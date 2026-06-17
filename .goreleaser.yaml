@@ -1,0 +1,115 @@
+version: 2
+
+project_name: c2pa-mcp
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: c2pa-mcp
+    main: .
+    binary: c2pa-mcp
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: default
+    ids: [c2pa-mcp]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^test:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Bug fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Others
+      order: 999
+
+# Container images built with ko (cross-compiled, no Docker/buildx needed).
+kos:
+  - id: c2pa-mcp
+    build: c2pa-mcp
+    repositories:
+      - ghcr.io/richardwooding/c2pa-mcp
+    base_image: cgr.dev/chainguard/static
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    tags:
+      - "{{.Version}}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    sbom: spdx
+    bare: true
+    preserve_import_paths: false
+    labels:
+      org.opencontainers.image.source: "https://github.com/richardwooding/c2pa-mcp"
+      org.opencontainers.image.licenses: "MIT"
+      org.opencontainers.image.description: "CLI and MCP server for reading and validating C2PA / Content Credentials"
+      org.opencontainers.image.version: "{{.Version}}"
+      org.opencontainers.image.revision: "{{.Commit}}"
+
+# Homebrew cask published to the richardwooding/homebrew-tap repository.
+homebrew_casks:
+  - name: c2pa-mcp
+    binaries:
+      - c2pa-mcp
+    repository:
+      owner: richardwooding
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} {{ .Tag }}"
+    homepage: "https://github.com/richardwooding/c2pa-mcp"
+    description: "CLI and MCP server for reading and validating C2PA / Content Credentials in JPEG and PNG"
+    # c2pa-mcp is not yet signed/notarized, so strip the quarantine xattr on
+    # install to let macOS Gatekeeper run the unsigned binary.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/c2pa-mcp"]
+          end
+    caveats: |
+      c2pa-mcp is not yet signed/notarized with an Apple Developer ID. The cask
+      removes the quarantine attribute on install so Gatekeeper lets it run. If
+      macOS still blocks it, run:
+        sudo xattr -dr com.apple.quarantine $(brew --prefix)/bin/c2pa-mcp

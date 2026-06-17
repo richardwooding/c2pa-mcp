@@ -1,0 +1,7 @@
+coverage.out
+*.test
+/c2pa-mcp
+/dist/
+
+# JetBrains IDE
+.idea/
