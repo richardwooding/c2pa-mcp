@@ -1,10 +1,19 @@
 # c2pa-mcp
 
+[![CI](https://github.com/richardwooding/c2pa-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/richardwooding/c2pa-mcp/actions/workflows/ci.yml)
+[![Release](https://github.com/richardwooding/c2pa-mcp/actions/workflows/release.yml/badge.svg)](https://github.com/richardwooding/c2pa-mcp/actions/workflows/release.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/richardwooding/c2pa-mcp.svg)](https://pkg.go.dev/github.com/richardwooding/c2pa-mcp)
+[![Go Report Card](https://goreportcard.com/badge/github.com/richardwooding/c2pa-mcp)](https://goreportcard.com/report/github.com/richardwooding/c2pa-mcp)
+[![Latest release](https://img.shields.io/github/v/release/richardwooding/c2pa-mcp?sort=semver)](https://github.com/richardwooding/c2pa-mcp/releases)
+[![License: MIT](https://img.shields.io/github/license/richardwooding/c2pa-mcp)](LICENSE)
+
 A CLI **and** [Model Context Protocol](https://modelcontextprotocol.io) server for reading
 and validating [C2PA / Content Credentials](https://c2pa.org) provenance in **JPEG and PNG**
 files. It is a thin, pure-Go wrapper around
 [`github.com/richardwooding/c2pa`](https://github.com/richardwooding/c2pa) — that library does
 all the C2PA work; this repo just exposes it to humans (CLI) and to AI agents (MCP).
+
+![c2pa-mcp detect and verify in the terminal](docs/demo.gif)
 
 Two operations, mirroring the library's two modes:
 
