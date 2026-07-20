@@ -3,9 +3,9 @@ module github.com/richardwooding/c2pa-mcp
 go 1.26.2
 
 require (
-	github.com/alecthomas/kong v1.15.0
+	github.com/alecthomas/kong v1.16.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
-	github.com/richardwooding/c2pa v0.2.0
+	github.com/richardwooding/c2pa v0.3.0
 )
 
 require (
