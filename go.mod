@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/alecthomas/kong v1.16.0
-	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/richardwooding/c2pa v0.3.0
 )
 
@@ -22,6 +22,7 @@ require (
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.46.0 // indirect
 )
 
