@@ -12,17 +12,17 @@ import (
 // DetectArgs are the inputs to the detect tool. Exactly one of Path, URL, or
 // Bytes must be set.
 type DetectArgs struct {
-	Path  string `json:"path,omitempty" jsonschema:"Local filesystem path to a JPEG or PNG image"`
-	URL   string `json:"url,omitempty" jsonschema:"HTTP(S) URL of a JPEG or PNG image to fetch and analyze"`
-	Bytes string `json:"bytes,omitempty" jsonschema:"Base64-encoded (standard encoding) JPEG or PNG image bytes"`
+	Path  string `json:"path,omitempty" jsonschema:"Local filesystem path to a JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF file"`
+	URL   string `json:"url,omitempty" jsonschema:"HTTP(S) URL of a JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF file to fetch and analyze"`
+	Bytes string `json:"bytes,omitempty" jsonschema:"Base64-encoded (standard encoding) JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF bytes"`
 }
 
 // VerifyArgs are the inputs to the verify tool. Exactly one of Path, URL, or
 // Bytes must be set.
 type VerifyArgs struct {
-	Path             string `json:"path,omitempty" jsonschema:"Local filesystem path to a JPEG or PNG image"`
-	URL              string `json:"url,omitempty" jsonschema:"HTTP(S) URL of a JPEG or PNG image to fetch and analyze"`
-	Bytes            string `json:"bytes,omitempty" jsonschema:"Base64-encoded (standard encoding) JPEG or PNG image bytes"`
+	Path             string `json:"path,omitempty" jsonschema:"Local filesystem path to a JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF file"`
+	URL              string `json:"url,omitempty" jsonschema:"HTTP(S) URL of a JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF file to fetch and analyze"`
+	Bytes            string `json:"bytes,omitempty" jsonschema:"Base64-encoded (standard encoding) JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF bytes"`
 	OnlineRevocation bool   `json:"online_revocation,omitempty" jsonschema:"Enable OCSP/CRL revocation checks over the network (soft-fail)"`
 	MaxScan          int    `json:"max_scan,omitempty" jsonschema:"Override the maximum number of leading bytes to read (0 = library default of 256 MiB)"`
 }

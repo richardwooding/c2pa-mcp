@@ -19,9 +19,9 @@ import (
 	"github.com/richardwooding/c2pa"
 )
 
-// ErrUnsupportedFormat is returned when the input is neither JPEG nor PNG. The
-// c2pa library only reads manifests from those two containers.
-var ErrUnsupportedFormat = errors.New("unsupported image format: only JPEG and PNG are supported")
+// ErrUnsupportedFormat is returned when the input is not one of the containers
+// the c2pa library reads manifests from.
+var ErrUnsupportedFormat = errors.New("unsupported format: only JPEG, PNG, BMFF (HEIC/AVIF/MP4/MOV) and PDF are supported")
 
 // ErrNoSource is returned when an Input names zero sources, and ErrMultipleSources
 // when it names more than one. Exactly one must be set.
@@ -48,7 +48,13 @@ type Input struct {
 var (
 	jpegMagic = []byte{0xFF, 0xD8, 0xFF}
 	pngMagic  = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	ftypBrand = []byte("ftyp")
+	pdfMagic  = []byte("%PDF-")
 )
+
+// pdfHeaderSearch mirrors the c2pa parser's own tolerance: %PDF- has to appear
+// in the first 1 KiB, not necessarily at offset 0.
+const pdfHeaderSearch = 1024
 
 // Open resolves in to a reader, sniffs its container format, and returns both
 // alongside a closer the caller must invoke when done. The returned reader is
@@ -139,15 +145,19 @@ func openRaw(ctx context.Context, in Input, httpClient *http.Client) (io.Reader,
 // sniff peeks at the leading bytes of br and maps them to a c2pa.Container.
 // Peeking does not advance the reader.
 func sniff(br *bufio.Reader) (c2pa.Container, error) {
-	head, err := br.Peek(len(pngMagic))
+	head, err := br.Peek(pdfHeaderSearch)
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
-		return "", fmt.Errorf("read image header: %w", err)
+		return "", fmt.Errorf("read asset header: %w", err)
 	}
 	switch {
 	case bytes.HasPrefix(head, jpegMagic):
 		return c2pa.JPEG, nil
 	case bytes.HasPrefix(head, pngMagic):
 		return c2pa.PNG, nil
+	case len(head) >= 12 && bytes.Equal(head[4:8], ftypBrand):
+		return c2pa.BMFF, nil
+	case bytes.Contains(head, pdfMagic):
+		return c2pa.PDF, nil
 	default:
 		return "", ErrUnsupportedFormat
 	}
