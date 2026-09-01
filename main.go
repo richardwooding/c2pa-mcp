@@ -1,5 +1,5 @@
 // Command c2pa-mcp is both a CLI and an MCP server for reading and validating
-// C2PA / Content Credentials provenance in JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF files. It wraps the
+// C2PA / Content Credentials provenance in JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF files. It wraps the
 // github.com/richardwooding/c2pa library.
 //
 //   - detect: report what a file CLAIMS (fast, unverified — like EXIF)
@@ -52,7 +52,7 @@ type CLI struct {
 
 // DetectCmd implements `c2pa-mcp detect`.
 type DetectCmd struct {
-	File string `arg:"" default:"-" help:"Asset file (JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF), or '-' for stdin."`
+	File string `arg:"" default:"-" help:"Asset file (JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF), or '-' for stdin."`
 	JSON bool   `help:"Emit JSON instead of a human-readable summary."`
 }
 
@@ -71,7 +71,7 @@ func (c *DetectCmd) Run() error {
 
 // VerifyCmd implements `c2pa-mcp verify`.
 type VerifyCmd struct {
-	File             string `arg:"" default:"-" help:"Asset file (JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF), or '-' for stdin."`
+	File             string `arg:"" default:"-" help:"Asset file (JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF), or '-' for stdin."`
 	JSON             bool   `help:"Emit JSON instead of a human-readable summary."`
 	SigningTrust     string `help:"Path to a PEM bundle overriding the embedded signing-anchor trust list." type:"existingfile"`
 	TimestampTrust   string `help:"Path to a PEM bundle overriding the embedded timestamp-authority trust list." type:"existingfile"`
@@ -200,7 +200,7 @@ func main() {
 	cli := CLI{}
 	kctx := kong.Parse(&cli,
 		kong.Name("c2pa-mcp"),
-		kong.Description("Read and validate C2PA / Content Credentials provenance in JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF files, as a CLI or an MCP server."),
+		kong.Description("Read and validate C2PA / Content Credentials provenance in JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF files, as a CLI or an MCP server."),
 		kong.UsageOnError(),
 		kong.Vars{"version": versionString()},
 	)

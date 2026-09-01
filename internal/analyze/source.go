@@ -21,7 +21,7 @@ import (
 
 // ErrUnsupportedFormat is returned when the input is not one of the containers
 // the c2pa library reads manifests from.
-var ErrUnsupportedFormat = errors.New("unsupported format: only JPEG, PNG, BMFF (HEIC/AVIF/MP4/MOV) and PDF are supported")
+var ErrUnsupportedFormat = errors.New("unsupported format: only JPEG, PNG, WebP, GIF, TIFF/DNG, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF are supported")
 
 // ErrNoSource is returned when an Input names zero sources, and ErrMultipleSources
 // when it names more than one. Exactly one must be set.
@@ -50,6 +50,13 @@ var (
 	pngMagic  = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
 	ftypBrand = []byte("ftyp")
 	pdfMagic  = []byte("%PDF-")
+	riffMagic = []byte("RIFF")
+	gifMagic  = []byte("GIF")
+	id3Magic  = []byte("ID3")
+	tiffLE    = []byte{'I', 'I', 42, 0}
+	tiffBE    = []byte{'M', 'M', 0, 42}
+	svgMagic  = []byte("<svg")
+	xmlMagic  = []byte("<?xml")
 )
 
 // pdfHeaderSearch mirrors the c2pa parser's own tolerance: %PDF- has to appear
@@ -156,8 +163,18 @@ func sniff(br *bufio.Reader) (c2pa.Container, error) {
 		return c2pa.PNG, nil
 	case len(head) >= 12 && bytes.Equal(head[4:8], ftypBrand):
 		return c2pa.BMFF, nil
+	case bytes.HasPrefix(head, riffMagic):
+		return c2pa.RIFF, nil // WebP, WAV, AVI — one carrier, three form types
+	case bytes.HasPrefix(head, tiffLE) || bytes.HasPrefix(head, tiffBE):
+		return c2pa.TIFF, nil
+	case bytes.HasPrefix(head, gifMagic):
+		return c2pa.GIF, nil
+	case bytes.HasPrefix(head, id3Magic):
+		return c2pa.MP3, nil
 	case bytes.Contains(head, pdfMagic):
 		return c2pa.PDF, nil
+	case bytes.Contains(head, svgMagic) || bytes.Contains(head, xmlMagic):
+		return c2pa.SVG, nil
 	default:
 		return "", ErrUnsupportedFormat
 	}

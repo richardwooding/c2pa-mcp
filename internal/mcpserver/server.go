@@ -28,14 +28,14 @@ func New(version string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "detect",
-		Description: "Report what a JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF file CLAIMS about its C2PA / Content Credentials " +
+		Description: "Report what a JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF file CLAIMS about its C2PA / Content Credentials " +
 			"provenance (generator, title, AI flag, claimed signer and signing time). Fast and " +
 			"UNVERIFIED — like reading EXIF; it does not check signatures. Use verify to validate.",
 	}, h.detect)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "verify",
-		Description: "Fully validate a JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF file's C2PA / Content Credentials manifest: COSE " +
+		Description: "Fully validate a JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF file's C2PA / Content Credentials manifest: COSE " +
 			"signature, certificate chain against the trust list, assertion and hard-binding hashes, " +
 			"and the RFC 3161 timestamp. Returns an overall valid flag plus per-step status codes.",
 	}, h.verify)

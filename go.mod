@@ -5,7 +5,7 @@ go 1.26.2
 require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0
-	github.com/richardwooding/c2pa v0.6.0
+	github.com/richardwooding/c2pa v0.7.0
 )
 
 require (

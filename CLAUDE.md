@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `c2pa-mcp` is both a CLI **and** an MCP server for reading and validating C2PA / Content
-Credentials provenance in **JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF** files. It is a thin wrapper around
+Credentials provenance in **JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF** files. It is a thin wrapper around
 [`github.com/richardwooding/c2pa`](https://github.com/richardwooding/c2pa) — that library does all
 the actual C2PA work (manifest reading, COSE signatures, cert chains, hashes, RFC 3161 timestamps).
 This repo only resolves an input image, sniffs its format, and re-shapes the library's output for

@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/github/license/richardwooding/c2pa-mcp)](LICENSE)
 
 A CLI **and** [Model Context Protocol](https://modelcontextprotocol.io) server for reading
-and validating [C2PA / Content Credentials](https://c2pa.org) provenance in **JPEG, PNG, HEIC, AVIF, MP4, MOV or PDF**
+and validating [C2PA / Content Credentials](https://c2pa.org) provenance in **JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF**
 files. It is a thin, pure-Go wrapper around
 [`github.com/richardwooding/c2pa`](https://github.com/richardwooding/c2pa) — that library does
 all the C2PA work; this repo just exposes it to humans (CLI) and to AI agents (MCP).
