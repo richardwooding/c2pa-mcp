@@ -16,8 +16,8 @@ github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUq
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
 github.com/modelcontextprotocol/go-sdk v1.7.0 h1:yqjY2dsbKAC0LSuWZVBMrHgiG8ukXv6NRo0JiALay44=
 github.com/modelcontextprotocol/go-sdk v1.7.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
-github.com/richardwooding/c2pa v0.8.1 h1:TjREltt4K1HN+A28y3olBH9qot9poLfNwdZZZ5bQO/I=
-github.com/richardwooding/c2pa v0.8.1/go.mod h1:hwm73tcBNm4aUzF6TM/FQNm8gMrom17sct+iRSEWV2M=
+github.com/richardwooding/c2pa v0.9.0 h1:fyqM3zX6A2G7yTBZioTb1hdXB4eC5SCtXiuyvN/cVms=
+github.com/richardwooding/c2pa v0.9.0/go.mod h1:hwm73tcBNm4aUzF6TM/FQNm8gMrom17sct+iRSEWV2M=
 github.com/segmentio/asm v1.1.3 h1:WM03sfUOENvvKexOLp+pCqgb/WDjsi7EK8gIsICtzhc=
 github.com/segmentio/asm v1.1.3/go.mod h1:Ld3L4ZXGNcSLRg4JBsZ3//1+f/TjYl0Mzen/DQy1EJg=
 github.com/segmentio/encoding v0.5.4 h1:OW1VRern8Nw6ITAtwSZ7Idrl3MXCFwXHPgqESYfvNt0=
