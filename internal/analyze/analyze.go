@@ -35,12 +35,19 @@ type StatusInfo struct {
 // VerifyResult is the JSON-serializable form of c2pa.Validate's output. Valid is
 // true iff no failure-severity status was recorded, mirroring the library.
 type VerifyResult struct {
-	Valid               bool         `json:"valid"`
-	ActiveManifestLabel string       `json:"active_manifest_label,omitempty"`
-	SignedAt            *time.Time   `json:"signed_at,omitempty"` // from a VERIFIED timestamp
-	Signers             []string     `json:"signers,omitempty"`   // signer chain subject CNs, leaf first
-	Detect              DetectResult `json:"detect"`              // the unverified claims, for convenience
-	Statuses            []StatusInfo `json:"statuses"`
+	Valid               bool       `json:"valid"`
+	ActiveManifestLabel string     `json:"active_manifest_label,omitempty"`
+	SignedAt            *time.Time `json:"signed_at,omitempty"` // from a VERIFIED timestamp
+	// VerifiedSigner is the signer's identity once PROVEN — the claim signature
+	// verified and the chain reached a trust anchor. Empty otherwise. This is the
+	// field to trust; Signers below is only what the file presented.
+	VerifiedSigner string `json:"verified_signer,omitempty"`
+	// Signers is the signer chain's subject CNs, leaf first, AS PRESENTED in the
+	// manifest — populated whether or not the chain verified, so a name read from
+	// it is a claim.
+	Signers  []string     `json:"signers,omitempty"`
+	Detect   DetectResult `json:"detect"` // the unverified claims, for convenience
+	Statuses []StatusInfo `json:"statuses"`
 }
 
 // VerifyOptions is the common subset of c2pa.ValidateOption controls exposed by
@@ -79,6 +86,7 @@ func Verify(ctx context.Context, container c2pa.Container, r io.Reader, opts Ver
 		t := res.SignedAt
 		out.SignedAt = &t
 	}
+	out.VerifiedSigner = res.VerifiedSigner()
 	for _, cert := range res.SignerChain {
 		out.Signers = append(out.Signers, certName(cert))
 	}
@@ -203,8 +211,11 @@ func (v VerifyResult) Summary() string {
 		b.WriteString("INVALID: C2PA validation found at least one failure.\n")
 	}
 	writeField(&b, "Active manifest", v.ActiveManifestLabel)
+	if v.VerifiedSigner != "" {
+		writeField(&b, "Signed by (verified)", v.VerifiedSigner)
+	}
 	if len(v.Signers) > 0 {
-		writeField(&b, "Signer chain", strings.Join(v.Signers, " <- "))
+		writeField(&b, "Signer chain (as presented)", strings.Join(v.Signers, " <- "))
 	}
 	if v.SignedAt != nil {
 		writeField(&b, "Signed at (verified)", v.SignedAt.Format(time.RFC3339))

@@ -37,7 +37,11 @@ func New(version string) *mcp.Server {
 		Name: "verify",
 		Description: "Fully validate a JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF file's C2PA / Content Credentials manifest: COSE " +
 			"signature, certificate chain against the trust list, assertion and hard-binding hashes, " +
-			"and the RFC 3161 timestamp. Returns an overall valid flag plus per-step status codes.",
+			"and the RFC 3161 timestamp. Returns an overall valid flag plus per-step status codes. " +
+			"Read `verified_signer` for who provably signed it — it is empty unless the signature " +
+			"verified AND the chain reached a trust anchor. `signers` is the chain as PRESENTED in " +
+			"the file and is populated even when validation failed, so it is a claim, not proof; " +
+			"the same is true of everything under `detect`.",
 	}, h.verify)
 
 	return server
