@@ -15,7 +15,15 @@ import (
 // CLAIMS about its provenance, unverified (like EXIF or an unverified From:
 // header). SignedBy and SignedAt are claims, not proof.
 type DetectResult struct {
-	Present        bool       `json:"present"`
+	Present bool `json:"present"`
+	// Attribution says who the manifest is a claim ABOUT: "asset" when the
+	// file's own structure associates it, "embedded" when the file associates
+	// it with something it CARRIES (a PDF object-level manifest, spec §A.4.3),
+	// "unknown" when nothing places it at all. For the latter two, SignedBy is
+	// not the file's signer — it belongs to the resource the manifest describes,
+	// and reporting it as the file's is the mistake this field exists to
+	// prevent. Omitted when there is no manifest.
+	Attribution    string     `json:"attribution,omitempty"`
 	ClaimGenerator string     `json:"claim_generator,omitempty"`
 	Title          string     `json:"title,omitempty"`
 	Format         string     `json:"format,omitempty"`
@@ -145,6 +153,7 @@ func poolFromPEM(pem []byte, what string) (*x509.CertPool, error) {
 func toDetectResult(info c2pa.Info) DetectResult {
 	res := DetectResult{
 		Present:        info.Present,
+		Attribution:    string(info.Attribution),
 		ClaimGenerator: info.ClaimGenerator,
 		Title:          info.Title,
 		Format:         info.Format,

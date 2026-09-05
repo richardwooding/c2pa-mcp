@@ -129,6 +129,7 @@ normal `verify` result with `valid: false`.
 ```json
 {
   "present": true,
+  "attribution": "asset",
   "claim_generator": "make_test_images/0.33.1 c2pa-rs/0.33.1",
   "title": "CA.jpg",
   "format": "image/jpeg",
@@ -137,6 +138,12 @@ normal `verify` result with `valid: false`.
   "signed_at": "2024-08-06T21:53:37Z"
 }
 ```
+
+`attribution` says who the manifest is a claim **about**: `asset` when the file's own structure
+associates it, `embedded` when the file associates it with something it *carries* (a PDF
+object-level manifest, spec §A.4.3), `unknown` when nothing places it at all. For the latter two,
+`signed_by` belongs to the resource the manifest describes rather than to the file — do not report
+it as the file's signer.
 
 `verify` adds `valid`, `active_manifest_label`, a verified `signed_at`, the `signers` chain
 (subject CNs, leaf first), and an ordered `statuses` list of `{code, severity, uri, explanation}`
