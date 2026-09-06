@@ -60,7 +60,39 @@ func unsignedPNG(t *testing.T) []byte {
 	return unsignedImage(t, func(w *bytes.Buffer, img image.Image) error { return png.Encode(w, img) })
 }
 
-func TestLoadSigner(t *testing.T) {
+// assertNoPEMLeak fails when an error message carries PEM material.
+func assertNoPEMLeak(t *testing.T, err error) {
+	t.Helper()
+	if err != nil && (strings.Contains(err.Error(), "BEGIN") || strings.Contains(err.Error(), "AAAA")) {
+		t.Fatalf("error echoes PEM material: %v", err)
+	}
+}
+
+func TestLoadSigner_Accepts(t *testing.T) {
+	creds, err := testpki.SelfSigned("Loader")
+	if err != nil {
+		t.Fatal(err)
+	}
+	combined := append(append([]byte{}, creds.KeyPEM()...), creds.CertPEM()...)
+	cases := map[string]SignerConfig{
+		"pkcs8":                  {KeyPEM: creds.KeyPEM(), CertPEM: creds.CertPEM()},
+		"sec1":                   {KeyPEM: creds.KeyPEMSEC1(), CertPEM: creds.CertPEM()},
+		"combined file for both": {KeyPEM: combined, CertPEM: combined},
+	}
+	for name, cfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, err := LoadSigner(cfg)
+			if err != nil {
+				t.Fatalf("LoadSigner: %v", err)
+			}
+			if s.Name() != "Loader" || s.Timestamped() {
+				t.Fatalf("Name = %q, Timestamped = %v", s.Name(), s.Timestamped())
+			}
+		})
+	}
+}
+
+func TestLoadSigner_Rejects(t *testing.T) {
 	creds, err := testpki.SelfSigned("Loader")
 	if err != nil {
 		t.Fatal(err)
@@ -69,46 +101,27 @@ func TestLoadSigner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	combined := append(append([]byte{}, creds.KeyPEM()...), creds.CertPEM()...)
 	encrypted := []byte("-----BEGIN ENCRYPTED PRIVATE KEY-----\nAAAA\n-----END ENCRYPTED PRIVATE KEY-----\n")
-
+	badCert := []byte("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n")
 	cases := []struct {
 		name    string
-		key     []byte
-		cert    []byte
+		cfg     SignerConfig
 		wantErr error
 	}{
-		{"pkcs8", creds.KeyPEM(), creds.CertPEM(), nil},
-		{"sec1", creds.KeyPEMSEC1(), creds.CertPEM(), nil},
-		{"combined file for both", combined, combined, nil},
-		{"no key block", creds.CertPEM(), creds.CertPEM(), ErrSigningKey},
-		{"garbage key", []byte("not pem"), creds.CertPEM(), ErrSigningKey},
-		{"encrypted key", encrypted, creds.CertPEM(), ErrSigningKey},
-		{"no cert block", creds.KeyPEM(), creds.KeyPEM(), ErrSigningCert},
-		{"garbage cert", creds.KeyPEM(), []byte("-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n"), ErrSigningCert},
-		{"key does not match cert", creds.KeyPEM(), other.CertPEM(), c2pa.ErrSignerChain},
+		{"no key block", SignerConfig{KeyPEM: creds.CertPEM(), CertPEM: creds.CertPEM()}, ErrSigningKey},
+		{"garbage key", SignerConfig{KeyPEM: []byte("not pem"), CertPEM: creds.CertPEM()}, ErrSigningKey},
+		{"encrypted key", SignerConfig{KeyPEM: encrypted, CertPEM: creds.CertPEM()}, ErrSigningKey},
+		{"no cert block", SignerConfig{KeyPEM: creds.KeyPEM(), CertPEM: creds.KeyPEM()}, ErrSigningCert},
+		{"garbage cert", SignerConfig{KeyPEM: creds.KeyPEM(), CertPEM: badCert}, ErrSigningCert},
+		{"key does not match cert", SignerConfig{KeyPEM: creds.KeyPEM(), CertPEM: other.CertPEM()}, c2pa.ErrSignerChain},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s, err := LoadSigner(SignerConfig{KeyPEM: tc.key, CertPEM: tc.cert})
-			if tc.wantErr != nil {
-				if !errors.Is(err, tc.wantErr) {
-					t.Fatalf("err = %v, want %v", err, tc.wantErr)
-				}
-				if err != nil && (strings.Contains(err.Error(), "BEGIN") || strings.Contains(err.Error(), "AAAA")) {
-					t.Fatalf("error echoes PEM material: %v", err)
-				}
-				return
+			_, err := LoadSigner(tc.cfg)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
 			}
-			if err != nil {
-				t.Fatalf("LoadSigner: %v", err)
-			}
-			if s.Name() != "Loader" {
-				t.Fatalf("Name = %q", s.Name())
-			}
-			if s.Timestamped() {
-				t.Fatal("Timestamped = true without a TSA")
-			}
+			assertNoPEMLeak(t, err)
 		})
 	}
 	t.Run("encrypted key names the remedy", func(t *testing.T) {
@@ -119,9 +132,46 @@ func TestLoadSigner(t *testing.T) {
 	})
 }
 
+// assertCreated checks the shape of a fresh c2pa.created signing.
+func assertCreated(t *testing.T, res SignResult, container c2pa.Container, inputLen, outLen int) {
+	t.Helper()
+	if res.Action != c2pa.ActionCreated || res.ChainedPriorManifest || res.Timestamped {
+		t.Fatalf("result = %+v", res)
+	}
+	if res.Size != outLen || outLen <= inputLen {
+		t.Fatalf("size %d, wrote %d, input %d", res.Size, outLen, inputLen)
+	}
+	if res.Container != string(container) || res.Output != "" || res.SignedBytes != "" {
+		t.Fatalf("result = %+v", res)
+	}
+	if !res.Verify.Valid || res.Verify.VerifiedSigner != "Test Signer" || res.Verify.Detect.Title != "hello.img" {
+		t.Fatalf("verify = %+v", res.Verify)
+	}
+	if !strings.Contains(res.Summary(), "SIGNED: c2pa.created") || !strings.Contains(res.Summary(), "VALID") {
+		t.Fatalf("summary: %s", res.Summary())
+	}
+}
+
+// assertReadsBack checks a signed asset through the ordinary verify and detect
+// paths, with the signer's certificate as the anchor.
+func assertReadsBack(t *testing.T, container c2pa.Container, out []byte, certPEM []byte) {
+	t.Helper()
+	ctx := context.Background()
+	v, err := Verify(ctx, container, bytes.NewReader(out), VerifyOptions{SigningTrustPEM: certPEM})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !v.Valid || !hasStatus(v, "assertion.dataHash.match") || !hasStatus(v, "signingCredential.trusted") {
+		t.Fatalf("verify of output: %+v", v.Statuses)
+	}
+	d := Detect(ctx, container, bytes.NewReader(out))
+	if !d.Present || !strings.Contains(d.ClaimGenerator, "c2pa-mcp-test") || d.SignedBy != "Test Signer" {
+		t.Fatalf("detect of output: %+v", d)
+	}
+}
+
 func TestSign_Created(t *testing.T) {
 	s, creds := testSigner(t, nil)
-	ctx := context.Background()
 	for _, tc := range []struct {
 		name      string
 		container c2pa.Container
@@ -129,38 +179,12 @@ func TestSign_Created(t *testing.T) {
 	}{{"jpeg", c2pa.JPEG, unsignedJPEG(t)}, {"png", c2pa.PNG, unsignedPNG(t)}} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
-			res, err := s.Sign(ctx, tc.container, bytes.NewReader(tc.data), &out, SignRequest{Title: "hello.img", DigitalSourceType: "digitalCapture"})
+			res, err := s.Sign(context.Background(), tc.container, bytes.NewReader(tc.data), &out, SignRequest{Title: "hello.img", DigitalSourceType: "digitalCapture"})
 			if err != nil {
 				t.Fatalf("Sign: %v", err)
 			}
-			if res.Action != c2pa.ActionCreated || res.ChainedPriorManifest || res.Timestamped {
-				t.Fatalf("result = %+v", res)
-			}
-			if res.Size != out.Len() || out.Len() <= len(tc.data) {
-				t.Fatalf("size %d, wrote %d, input %d", res.Size, out.Len(), len(tc.data))
-			}
-			if !res.Verify.Valid || res.Verify.VerifiedSigner != "Test Signer" || res.Verify.Detect.Title != "hello.img" {
-				t.Fatalf("verify = %+v", res.Verify)
-			}
-			if res.Container != string(tc.container) || res.Output != "" || res.SignedBytes != "" {
-				t.Fatalf("result = %+v", res)
-			}
-			// The output verifies through the ordinary verify path with the
-			// signer's certificate as the anchor, and reads as claimed.
-			v, err := Verify(ctx, tc.container, bytes.NewReader(out.Bytes()), VerifyOptions{SigningTrustPEM: creds.CertPEM()})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !v.Valid || !hasStatus(v, "assertion.dataHash.match") || !hasStatus(v, "signingCredential.trusted") {
-				t.Fatalf("verify of output: %+v", v.Statuses)
-			}
-			d := Detect(ctx, tc.container, bytes.NewReader(out.Bytes()))
-			if !d.Present || d.ClaimGenerator == "" || !strings.Contains(d.ClaimGenerator, "c2pa-mcp-test") || d.SignedBy != "Test Signer" {
-				t.Fatalf("detect of output: %+v", d)
-			}
-			if !strings.Contains(res.Summary(), "SIGNED: c2pa.created") || !strings.Contains(res.Summary(), "VALID") {
-				t.Fatalf("summary: %s", res.Summary())
-			}
+			assertCreated(t, res, tc.container, len(tc.data), out.Len())
+			assertReadsBack(t, tc.container, out.Bytes(), creds.CertPEM())
 		})
 	}
 }
@@ -253,13 +277,12 @@ func TestSign_TimestampFailureWritesNothing(t *testing.T) {
 	}
 }
 
-func TestSignToFile(t *testing.T) {
-	s, _ := testSigner(t, nil)
-	ctx := context.Background()
-	dir := t.TempDir()
+// signedFile signs an unsigned JPEG into dir/signed.jpg and returns the path
+// and the bytes written, asserting the temp file was cleaned up.
+func signedFile(t *testing.T, s *Signer, dir string) (string, []byte) {
+	t.Helper()
 	out := filepath.Join(dir, "signed.jpg")
-
-	res, err := s.SignToFile(ctx, c2pa.JPEG, bytes.NewReader(unsignedJPEG(t)), out, false, SignRequest{Title: "file"})
+	res, err := s.SignToFile(context.Background(), c2pa.JPEG, bytes.NewReader(unsignedJPEG(t)), out, false, SignRequest{Title: "file"})
 	if err != nil {
 		t.Fatalf("SignToFile: %v", err)
 	}
@@ -270,42 +293,68 @@ func TestSignToFile(t *testing.T) {
 	if err != nil || len(data) != res.Size {
 		t.Fatalf("read output: %v, %d bytes want %d", err, len(data), res.Size)
 	}
-	if d := Detect(ctx, c2pa.JPEG, bytes.NewReader(data)); d.Title != "file" {
-		t.Fatalf("detect: %+v", d)
-	}
+	assertOnlyOutput(t, dir)
+	return out, data
+}
+
+// assertOnlyOutput fails when anything but the signed file is left in dir.
+func assertOnlyOutput(t *testing.T, dir string) {
+	t.Helper()
 	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
 		t.Fatalf("temp file left behind: %v", entries)
 	}
+}
 
-	// Refused without overwrite; the file is untouched.
-	if _, err := s.SignToFile(ctx, c2pa.JPEG, bytes.NewReader(unsignedJPEG(t)), out, false, SignRequest{Title: "again"}); !errors.Is(err, ErrOutputExists) {
+// assertUnchanged fails when path no longer holds want.
+func assertUnchanged(t *testing.T, path string, want []byte) {
+	t.Helper()
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, want) {
+		t.Fatalf("%s changed", path)
+	}
+}
+
+func TestSignToFile(t *testing.T) {
+	s, _ := testSigner(t, nil)
+	out, data := signedFile(t, s, t.TempDir())
+	if d := Detect(context.Background(), c2pa.JPEG, bytes.NewReader(data)); d.Title != "file" {
+		t.Fatalf("detect: %+v", d)
+	}
+	_ = out
+}
+
+func TestSignToFile_RefusesOverwrite(t *testing.T) {
+	s, _ := testSigner(t, nil)
+	out, data := signedFile(t, s, t.TempDir())
+	_, err := s.SignToFile(context.Background(), c2pa.JPEG, bytes.NewReader(unsignedJPEG(t)), out, false, SignRequest{Title: "again"})
+	if !errors.Is(err, ErrOutputExists) {
 		t.Fatalf("err = %v, want ErrOutputExists", err)
 	}
-	if again, _ := os.ReadFile(out); !bytes.Equal(again, data) {
-		t.Fatal("refused write changed the file")
-	}
+	assertUnchanged(t, out, data)
+}
 
-	// A failing sign with overwrite leaves the existing file intact.
-	if _, err := s.SignToFile(ctx, c2pa.JPEG, bytes.NewReader([]byte("junk")), out, true, SignRequest{}); err == nil {
+func TestSignToFile_FailureKeepsExisting(t *testing.T) {
+	s, _ := testSigner(t, nil)
+	dir := t.TempDir()
+	out, data := signedFile(t, s, dir)
+	if _, err := s.SignToFile(context.Background(), c2pa.JPEG, bytes.NewReader([]byte("junk")), out, true, SignRequest{}); err == nil {
 		t.Fatal("expected an error signing junk")
 	}
-	if again, _ := os.ReadFile(out); !bytes.Equal(again, data) {
-		t.Fatal("failed overwrite damaged the file")
-	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
-		t.Fatalf("temp file left behind after failure: %v", entries)
-	}
+	assertUnchanged(t, out, data)
+	assertOnlyOutput(t, dir)
+}
 
-	// Overwrite, and sign a file onto itself.
-	res2, err := s.SignToFile(ctx, c2pa.JPEG, bytes.NewReader(data), out, true, SignRequest{Title: "in place"})
+func TestSignToFile_InPlace(t *testing.T) {
+	s, _ := testSigner(t, nil)
+	out, data := signedFile(t, s, t.TempDir())
+	res, err := s.SignToFile(context.Background(), c2pa.JPEG, bytes.NewReader(data), out, true, SignRequest{Title: "in place"})
 	if err != nil {
 		t.Fatalf("overwrite in place: %v", err)
 	}
-	if res2.Action != c2pa.ActionOpened || !res2.ChainedPriorManifest {
-		t.Fatalf("in-place re-sign should chain: %+v", res2)
+	if res.Action != c2pa.ActionOpened || !res.ChainedPriorManifest {
+		t.Fatalf("in-place re-sign should chain: %+v", res)
 	}
 	final, _ := os.ReadFile(out)
-	if d := Detect(ctx, c2pa.JPEG, bytes.NewReader(final)); d.Title != "in place" {
+	if d := Detect(context.Background(), c2pa.JPEG, bytes.NewReader(final)); d.Title != "in place" {
 		t.Fatalf("detect after in-place: %+v", d)
 	}
 }
