@@ -5,24 +5,26 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/richardwooding/c2pa-mcp/internal/analyze"
+	"github.com/richardwooding/c2pa-mcp/internal/testpki"
 )
 
 const fixture = "../../testdata/c2pa_signed.jpg"
 
 // connect wires an in-memory client to a freshly built server and returns the
 // client session. The server is connected before the client, as the SDK requires.
-func connect(t *testing.T) *mcp.ClientSession {
+func connect(t *testing.T, opts ...Option) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	server := New("test")
+	server := New("test", opts...)
 	if _, err := server.Connect(ctx, serverTransport, nil); err != nil {
 		t.Fatalf("server connect: %v", err)
 	}
@@ -86,6 +88,9 @@ func TestListTools(t *testing.T) {
 		if !got[want] {
 			t.Errorf("tool %q not advertised", want)
 		}
+	}
+	if got["sign"] {
+		t.Error("sign advertised without a signing identity")
 	}
 }
 
@@ -151,5 +156,151 @@ func TestDetectTool_BadInput(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Fatal("expected IsError for missing input source")
+	}
+}
+
+func testSigner(t *testing.T) *analyze.Signer {
+	t.Helper()
+	creds, err := testpki.SelfSigned("MCP Test Signer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := analyze.LoadSigner(analyze.SignerConfig{KeyPEM: creds.KeyPEM(), CertPEM: creds.CertPEM()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func toolNames(t *testing.T, session *mcp.ClientSession) map[string]bool {
+	t.Helper()
+	res, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	got := map[string]bool{}
+	for _, tool := range res.Tools {
+		got[tool.Name] = true
+	}
+	return got
+}
+
+func TestSignTool_AbsentWithoutSigner(t *testing.T) {
+	if toolNames(t, connect(t))["sign"] {
+		t.Fatal("sign tool advertised without a signing identity")
+	}
+}
+
+func TestSignTool_Bytes(t *testing.T) {
+	session := connect(t, WithSigner(testSigner(t)))
+	if !toolNames(t, session)["sign"] {
+		t.Fatal("sign tool not advertised with a signing identity")
+	}
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "sign",
+		Arguments: map[string]any{"bytes": fixtureBase64(t), "title": "signed by mcp"},
+	})
+	if err != nil {
+		t.Fatalf("call sign: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("sign reported tool error: %s", firstText(t, res))
+	}
+	if !strings.Contains(firstText(t, res), "SIGNED: c2pa.opened") {
+		t.Fatalf("unexpected summary: %q", firstText(t, res))
+	}
+	var got analyze.SignResult
+	structuredInto(t, res, &got)
+	if got.Action != "c2pa.opened" || !got.ChainedPriorManifest || !got.Verify.Valid || got.Output != "" {
+		t.Fatalf("result = %+v", got)
+	}
+	signed, err := base64.StdEncoding.DecodeString(got.SignedBytes)
+	if err != nil || len(signed) != got.Size {
+		t.Fatalf("signed_bytes: %v, %d bytes want %d", err, len(signed), got.Size)
+	}
+
+	// The signed asset reads back through the detect tool as claimed.
+	det, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "detect",
+		Arguments: map[string]any{"bytes": got.SignedBytes},
+	})
+	if err != nil || det.IsError {
+		t.Fatalf("detect on signed output: %v %v", err, det)
+	}
+	var d analyze.DetectResult
+	structuredInto(t, det, &d)
+	if d.Title != "signed by mcp" || d.SignedBy != "MCP Test Signer" {
+		t.Fatalf("detect = %+v", d)
+	}
+}
+
+func TestSignTool_PathOutput(t *testing.T) {
+	session := connect(t, WithSigner(testSigner(t)))
+	dir := t.TempDir()
+	out := filepath.Join(dir, "signed.jpg")
+
+	// path input without output is refused before anything is read.
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "sign",
+		Arguments: map[string]any{"path": fixture},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(firstText(t, res), "output is required") {
+		t.Fatalf("expected the output-required error, got %v %q", res.IsError, firstText(t, res))
+	}
+
+	res, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "sign",
+		Arguments: map[string]any{"path": fixture, "output": out, "action": "opened"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("sign reported tool error: %s", firstText(t, res))
+	}
+	var got analyze.SignResult
+	structuredInto(t, res, &got)
+	if got.Output != out || got.SignedBytes != "" {
+		t.Fatalf("result = %+v", got)
+	}
+	info, err := os.Stat(out)
+	if err != nil || int(info.Size()) != got.Size {
+		t.Fatalf("output file: %v", err)
+	}
+
+	// A second call refuses to overwrite unless asked.
+	res, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "sign",
+		Arguments: map[string]any{"path": fixture, "output": out},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(firstText(t, res), "already exists") {
+		t.Fatalf("expected an overwrite refusal, got %v %q", res.IsError, firstText(t, res))
+	}
+	res, err = session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "sign",
+		Arguments: map[string]any{"path": fixture, "output": out, "overwrite": true},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("overwrite: %v %v", err, res)
+	}
+}
+
+func TestSignTool_CreatedOnSignedRefused(t *testing.T) {
+	session := connect(t, WithSigner(testSigner(t)))
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "sign",
+		Arguments: map[string]any{"bytes": fixtureBase64(t), "action": "created"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError {
+		t.Fatal("created on an already-signed asset should be a tool error")
 	}
 }

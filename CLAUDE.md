@@ -4,19 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`c2pa-mcp` is both a CLI **and** an MCP server for reading and validating C2PA / Content
+`c2pa-mcp` is both a CLI **and** an MCP server for reading, validating and signing C2PA / Content
 Credentials provenance in **JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF** files. It is a thin wrapper around
 [`github.com/richardwooding/c2pa`](https://github.com/richardwooding/c2pa) — that library does all
 the actual C2PA work (manifest reading, COSE signatures, cert chains, hashes, RFC 3161 timestamps).
-This repo only resolves an input image, sniffs its format, and re-shapes the library's output for
-two front ends (humans via CLI, agents via MCP). When a change concerns C2PA semantics rather than
-plumbing, the fix usually belongs upstream in the `c2pa` library, not here.
+This repo only resolves an input image, sniffs its format, loads a signing identity from PEM, and
+re-shapes the library's output for two front ends (humans via CLI, agents via MCP). When a change
+concerns C2PA semantics rather than plumbing, the fix usually belongs upstream in the `c2pa`
+library, not here.
 
-Two operations mirror the library's two modes:
+Three operations mirror the library's three modes:
 - **detect** — what a file *claims* (generator, title, AI flag, claimed signer/time). Fast,
   **UNVERIFIED**, no crypto — like reading EXIF.
 - **verify** — full cryptographic validation; returns an overall `valid` flag plus per-step C2PA
   §15 status codes. An *invalid manifest is a normal result* (`valid: false`), not an error.
+- **sign** — embed a signed `c2pa.claim.v2` manifest with the operator's key and chain. The
+  library validates its own output before writing a byte, so a sign either produces a file that
+  verifies or produces nothing; a failure IS an error (exit 1 / tool error), unlike an invalid
+  manifest under verify.
 
 Requires Go 1.26+.
 
@@ -38,9 +43,15 @@ go fix -diff ./...                 # MUST print nothing — CI fails otherwise (
 Three layers, one shared core:
 
 - **`main.go`** — the [Kong](https://github.com/alecthomas/kong) CLI command tree (`detect`,
-  `verify`, `serve`). `version`/`commit`/`date` are injected via `-ldflags` by GoReleaser. `verify`
-  returns the sentinel `errInvalid` to force exit code 1 on an invalid manifest *without printing*
-  an error (so scripts can branch on exit status); `main` maps it to `os.Exit(1)`.
+  `verify`, `sign`, `serve`). `version`/`commit`/`date` are injected via `-ldflags` by GoReleaser.
+  `verify` returns the sentinel `errInvalid` to force exit code 1 on an invalid manifest *without
+  printing* an error (so scripts can branch on exit status); `main` maps it to `os.Exit(1)`.
+  `SignerFlags` (`--signing-key`, `--signing-cert`, `--tsa`, `--claim-generator`; env
+  `C2PA_SIGNING_KEY` / `C2PA_SIGNING_CERT` / `C2PA_TSA_URL`, all FILE PATHS) is `embed`ded in both
+  `sign` (required, checked in `load()`) and `serve` (optional — present means the MCP server gets
+  the `sign` tool). The names are deliberately not `--key`/`--cert`, which on `serve` would read as
+  TLS. `sign in out` writes through `analyze.SignToFile`; `sign in -` streams the asset to stdout
+  and the summary to stderr. `version` is passed as the claim generator's version.
 
 - **`internal/analyze`** — the **shared adapter** used identically by both front ends. This is where
   most logic lives.
@@ -54,18 +65,43 @@ Three layers, one shared core:
     the JSON-serializable `DetectResult`/`VerifyResult`. `VerifyResult` embeds the unverified
     `DetectResult` for convenience. Each result type has a `Summary()` for human-readable text.
     `VerifyOptions.toValidateOptions()` translates the exposed knobs (trust PEMs, online revocation,
-    max scan) into `c2pa.ValidateOption`s.
+    max scan) into `c2pa.ValidateOption`s; `verifyWith` is the shaping step both `Verify` and
+    `Sign` go through, so a signed asset is reported exactly as verify would report it.
+  - `sign.go`: `LoadSigner(SignerConfig)` parses PEM (PKCS#8 / SEC 1 / PKCS#1 keys, any number of
+    CERTIFICATE blocks, other blocks skipped so one combined file works; an encrypted key is named
+    as such with the openssl remedy) and builds a `c2pa.Signer` — which checks key↔leaf, chain
+    links, validity and the C2PA profile up front, so a `Signer` that loads can only fail on an
+    asset. **Errors never carry key material**: they quote the block type and the parser's message,
+    and `TestLoadSigner` asserts no PEM text leaks. `(*Signer).Sign` buffers the asset (the library
+    needs it whole anyway), decides `auto` action from `c2pa.Read(...).Present`, signs, then
+    re-validates the output with `WithSigningTrust(own chain top)`, `WithMaxIngredientDepth(0)`,
+    `WithOnlineRevocation(false)` for the `SignResult.Verify` report — depth 0 because a foreign
+    prior manifest's untrusted signer or TSA would otherwise fail OUR output's report (the library
+    makes the same choice for its self-check); the report says so, and points at verify.
+    `SignToFile` writes through a temp file in the target directory and renames into place, so a
+    failed sign never truncates an existing file and signing a file onto itself works; an existing
+    path is `ErrOutputExists` unless overwrite is set.
 
 - **`internal/mcpserver`** — wraps `analyze` as MCP tools using
   [`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk).
-  `New()` builds the server and registers the `detect`/`verify` tools; handlers in `tools.go` return
-  both a text block (`Summary()`) and structured content (the result struct). `serve` runs the same
-  server value over either `StdioTransport` or the **Streamable HTTP** transport (the deprecated
-  standalone SSE transport is intentionally not provided).
+  `New(version, opts...)` builds the server and registers the `detect`/`verify` tools, and `sign`
+  ONLY when `WithSigner` was given — a client should not see a capability the server cannot honour,
+  and key material is configured by the operator at startup, never taken as a tool argument (an
+  agent, or anyone reaching an HTTP server, would otherwise be handed the key). Handlers in
+  `tools.go` return both a text block (`Summary()`) and structured content (the result struct). The
+  `sign` tool requires `output` for `path`/`url` inputs (it will not guess a filename) and returns
+  `signed_bytes` only for a `bytes` input without `output`; `overwrite` defaults to refuse. `serve`
+  runs the same server value over either `StdioTransport` or the **Streamable HTTP** transport
+  (the deprecated standalone SSE transport is intentionally not provided).
+
+- **`internal/testpki`** — mints a self-signed P-256 certificate that satisfies the C2PA profile,
+  as PEM, for tests in both packages. Imported only by tests, so it is not in the binary.
 
 Key invariant: the CLI and MCP server must behave identically — they share `analyze.Open`,
-`analyze.Detect`, and `analyze.Verify`. Add new analysis behavior in `analyze`, then expose it from
-both `main.go` and `mcpserver`.
+`analyze.Detect`, `analyze.Verify`, and `analyze.Signer` (`Sign` / `SignToFile`). Add new
+behavior in `analyze`, then expose it from both `main.go` and `mcpserver`. Unsigned test assets are
+encoded in-memory with `image/jpeg` / `image/png`; the only fixture is the signed c2pa-rs JPEG,
+which the signing tests re-sign (auto → `opened`, prior manifest chained).
 
 ## Releasing
 

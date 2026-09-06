@@ -83,6 +83,13 @@ func Verify(ctx context.Context, container c2pa.Container, r io.Reader, opts Ver
 	if err != nil {
 		return VerifyResult{}, err
 	}
+	return verifyWith(ctx, container, r, cfg...), nil
+}
+
+// verifyWith runs the validator with ready-made options and shapes its result.
+// Verify and Sign both go through it, so a signed asset is reported exactly as
+// verify would report it.
+func verifyWith(ctx context.Context, container c2pa.Container, r io.Reader, cfg ...c2pa.ValidateOption) VerifyResult {
 	res := c2pa.Validate(ctx, container, r, cfg...)
 
 	out := VerifyResult{
@@ -114,7 +121,7 @@ func Verify(ctx context.Context, container c2pa.Container, r io.Reader, opts Ver
 		}
 		out.Statuses = append(out.Statuses, si)
 	}
-	return out, nil
+	return out
 }
 
 func (o VerifyOptions) toValidateOptions() ([]c2pa.ValidateOption, error) {
@@ -206,7 +213,7 @@ func (d DetectResult) Summary() string {
 	writeField(&b, "AI generated", boolStr(d.AIGenerated))
 	writeField(&b, "Signed by (claimed)", d.SignedBy)
 	if d.SignedAt != nil {
-		writeField(&b, "Signed at (claimed)", d.SignedAt.Format(time.RFC3339))
+		writeField(&b, "Signed at (claimed)", d.SignedAt.Format(timeLayout))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -227,7 +234,7 @@ func (v VerifyResult) Summary() string {
 		writeField(&b, "Signer chain (as presented)", strings.Join(v.Signers, " <- "))
 	}
 	if v.SignedAt != nil {
-		writeField(&b, "Signed at (verified)", v.SignedAt.Format(time.RFC3339))
+		writeField(&b, "Signed at (verified)", v.SignedAt.Format(timeLayout))
 	}
 	if v.Detect.AIGenerated {
 		writeField(&b, "AI generated", "yes")
@@ -244,6 +251,9 @@ func (v VerifyResult) Summary() string {
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
+
+// timeLayout is how summaries print verified and claimed times.
+const timeLayout = time.RFC3339
 
 func writeField(b *strings.Builder, label, value string) {
 	if value == "" {
