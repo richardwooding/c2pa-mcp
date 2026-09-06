@@ -235,7 +235,12 @@ func (s *Signer) Sign(ctx context.Context, container c2pa.Container, r io.Reader
 	if len(data) > c2pa.ValidateMaxScan {
 		return SignResult{}, c2pa.ErrAssetTooLarge
 	}
-	present := c2pa.Read(ctx, container, bytes.NewReader(data)).Present
+	// ExtractStore, not Read: Read stops at its 16 MiB triage cap, so a large
+	// asset whose store sits past it (a PDF's incremental update, an MP4 with
+	// the box after mdat) would look unsigned here and then be refused by the
+	// library as already signed. ExtractStore scans as far as Sign itself does.
+	store, _ := c2pa.ExtractStore(ctx, container, bytes.NewReader(data))
+	present := len(store) > 0
 
 	var action string
 	switch req.Action {
