@@ -80,7 +80,7 @@ kos:
     labels:
       org.opencontainers.image.source: "https://github.com/richardwooding/c2pa-mcp"
       org.opencontainers.image.licenses: "MIT"
-      org.opencontainers.image.description: "CLI and MCP server for reading and validating C2PA / Content Credentials"
+      org.opencontainers.image.description: "CLI and MCP server for reading, validating and signing C2PA / Content Credentials"
       org.opencontainers.image.version: "{{.Version}}"
       org.opencontainers.image.revision: "{{.Commit}}"
 
@@ -99,7 +99,7 @@ homebrew_casks:
       email: bot@goreleaser.com
     commit_msg_template: "Brew cask update for {{ .ProjectName }} {{ .Tag }}"
     homepage: "https://github.com/richardwooding/c2pa-mcp"
-    description: "CLI and MCP server for reading and validating C2PA / Content Credentials in JPEG and PNG"
+    description: "CLI and MCP server for reading, validating and signing C2PA / Content Credentials in JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 and PDF"
     # c2pa-mcp is not yet signed/notarized, so strip the quarantine xattr on
     # install to let macOS Gatekeeper run the unsigned binary.
     hooks:
