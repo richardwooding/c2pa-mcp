@@ -14,6 +14,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -43,6 +44,17 @@ func encodeScene(t *testing.T, encode func(*bytes.Buffer, image.Image) error) []
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+// isccSceneAssets encodes the scene into every container this build can both
+// sign and fingerprint, keyed by the container the signer needs.
+func isccSceneAssets(t *testing.T) map[c2pa.Container][]byte {
+	t.Helper()
+	return map[c2pa.Container][]byte{
+		c2pa.PNG:  encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return png.Encode(w, img) }),
+		c2pa.JPEG: encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return jpeg.Encode(w, img, nil) }),
+		c2pa.GIF:  encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return gif.Encode(w, img, nil) }),
+	}
 }
 
 // isccOf computes the code the recipe produces, independently of the signing
@@ -75,15 +87,58 @@ func hamming(a, b []byte) int {
 	return n
 }
 
+// softBindingFields flattens the scalar fields worth asserting into comparable
+// strings. A map plus one loop replaces a chain of branches, which the review
+// gate counts against us — and it reports EVERY wrong field, where a switch
+// stopped at the first.
+func softBindingFields(sb SoftBindingReport) map[string]string {
+	return map[string]string{
+		"label":          sb.Label,
+		"algorithm":      sb.Algorithm,
+		"algorithm type": sb.AlgorithmType,
+		"registered":     strconv.FormatBool(sb.AlgorithmRegistered),
+		"from claim":     strconv.FormatBool(sb.AlgorithmFromClaim),
+		"well formed":    strconv.FormatBool(sb.WellFormed),
+		"name":           sb.Name,
+		"url":            sb.URL,
+	}
+}
+
+// assertFields names every field of a flattened report that differs from what
+// was expected. Fields absent from want are not asserted.
+func assertFields(t *testing.T, got map[string]string, want map[string]string) {
+	t.Helper()
+	for field, w := range want {
+		if g := got[field]; g != w {
+			t.Errorf("%s = %q, want %q", field, g, w)
+		}
+	}
+}
+
+// assertISCCBlock checks the one block an ISCC soft binding carries: the code's
+// raw digest, base64 as the report presents it.
+func assertISCCBlock(t *testing.T, sb SoftBindingReport, wantDigest []byte) {
+	t.Helper()
+	if len(sb.Blocks) != 1 {
+		t.Fatalf("%d blocks, want 1", len(sb.Blocks))
+	}
+	got, err := base64.StdEncoding.DecodeString(sb.Blocks[0].Value)
+	if err != nil {
+		t.Fatalf("block value is not base64: %v", err)
+	}
+	if !bytes.Equal(got, wantDigest) {
+		t.Fatalf("block value = %x, want the ISCC digest %x", got, wantDigest)
+	}
+	if n := len(got); n != isccBits/8 {
+		t.Errorf("digest is %d bytes, want %d for a %d-bit code", n, isccBits/8, isccBits)
+	}
+}
+
 // TestSignSoftBindingISCC is the end-to-end feature: sign with --soft-binding
 // iscc and the signed asset carries an io.iscc.v0 assertion holding the code's
 // raw digest, which a verifier reads back and reports.
 func TestSignSoftBindingISCC(t *testing.T) {
-	assets := map[c2pa.Container][]byte{
-		c2pa.PNG:  encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return png.Encode(w, img) }),
-		c2pa.JPEG: encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return jpeg.Encode(w, img, nil) }),
-		c2pa.GIF:  encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return gif.Encode(w, img, nil) }),
-	}
+	assets := isccSceneAssets(t)
 	signer, _ := testSigner(t, nil)
 	for container, asset := range assets {
 		t.Run(string(container), func(t *testing.T) {
@@ -95,52 +150,29 @@ func TestSignSoftBindingISCC(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Sign: %v", err)
 			}
-			if res.SoftBinding != wantCode {
-				t.Errorf("SoftBinding = %q, want %q", res.SoftBinding, wantCode)
-			}
-			if !strings.HasPrefix(res.SoftBinding, "ISCC:") {
-				t.Errorf("SoftBinding = %q, want an ISCC: string", res.SoftBinding)
+			if res.SoftBinding != wantCode || !strings.HasPrefix(res.SoftBinding, "ISCC:") {
+				t.Errorf("SoftBinding = %q, want the ISCC %q", res.SoftBinding, wantCode)
 			}
 			// §9.1: a soft binding never replaces the hard one.
 			if !res.Verify.Valid || res.Verify.Binding != "verified" {
 				t.Fatalf("output valid = %v, binding = %q; want a verified hard binding too", res.Verify.Valid, res.Verify.Binding)
 			}
-
 			if len(res.Verify.SoftBindings) != 1 {
 				t.Fatalf("read back %d soft bindings, want 1", len(res.Verify.SoftBindings))
 			}
+
 			sb := res.Verify.SoftBindings[0]
-			switch {
-			case sb.Algorithm != isccAlgorithm:
-				t.Errorf("algorithm = %q, want %q", sb.Algorithm, isccAlgorithm)
-			case !sb.AlgorithmRegistered:
-				t.Error("io.iscc.v0 should be on the embedded C2PA list")
-			case sb.AlgorithmType != "fingerprint":
-				t.Errorf("algorithm type = %q, want fingerprint", sb.AlgorithmType)
-			case sb.AlgorithmFromClaim:
-				t.Error("the algorithm is written per assertion, not as the claim's alg_soft")
-			case !sb.WellFormed:
-				t.Error("the assertion we wrote should read back well-formed")
-			case sb.Name != wantCode:
-				t.Errorf("name = %q, want the canonical %q", sb.Name, wantCode)
-			case sb.Label != "c2pa.soft-binding":
-				t.Errorf("label = %q, want c2pa.soft-binding", sb.Label)
-			case sb.URL != "":
-				t.Errorf("url = %q, want none written", sb.URL)
-			}
-			if len(sb.Blocks) != 1 {
-				t.Fatalf("%d blocks, want 1", len(sb.Blocks))
-			}
-			got, err := base64.StdEncoding.DecodeString(sb.Blocks[0].Value)
-			if err != nil {
-				t.Fatalf("block value is not base64: %v", err)
-			}
-			if !bytes.Equal(got, wantDigest) {
-				t.Errorf("block value = %x, want the ISCC digest %x", got, wantDigest)
-			}
-			if n := len(got); n != isccBits/8 {
-				t.Errorf("digest is %d bytes, want %d for a %d-bit code", n, isccBits/8, isccBits)
-			}
+			assertFields(t, softBindingFields(sb), map[string]string{
+				"label":          "c2pa.soft-binding",
+				"algorithm":      isccAlgorithm,
+				"algorithm type": "fingerprint",
+				"registered":     "true",  // io.iscc.v0 is on the embedded C2PA list
+				"from claim":     "false", // written per assertion, not as the claim's alg_soft
+				"well formed":    "true",
+				"name":           wantCode, // the canonical string, for humans
+				"url":            "",       // deprecated; this writer emits none
+			})
+			assertISCCBlock(t, sb, wantDigest)
 		})
 	}
 }
@@ -322,33 +354,56 @@ func TestSoftBindingReportShapesEveryField(t *testing.T) {
 		t.Fatalf("%d reports, want 2", len(reports))
 	}
 	r := reports[0]
-	switch {
-	case !r.AlgorithmFromClaim:
-		t.Error("algorithm_from_claim lost")
-	case r.AlgorithmRegistered:
-		t.Error("phash is not on the C2PA list")
-	case r.URL != "http://example.invalid/resolve":
-		t.Errorf("url = %q; it must be reported (and never fetched)", r.URL)
-	case len(r.Blocks) != 2:
+	assertFields(t, softBindingFields(r), map[string]string{
+		"label":          "c2pa.soft-binding",
+		"algorithm":      "phash",
+		"algorithm type": "",      // not on the list, so we have no type for it
+		"registered":     "false", // the spec's own example algorithm is unregistered
+		"from claim":     "true",
+		"well formed":    "true",
+		"name":           "a watermark, allegedly",
+		// Reported so nothing is hidden, and never fetched.
+		"url": "http://example.invalid/resolve",
+	})
+	if len(r.Blocks) != 2 {
 		t.Fatalf("%d blocks, want 2", len(r.Blocks))
 	}
-	if r.Blocks[0].Value != base64.StdEncoding.EncodeToString([]byte{1, 2, 3}) {
-		t.Errorf("value = %q, want base64 of 010203", r.Blocks[0].Value)
-	}
-	if r.Blocks[0].TimespanStartMS == nil || *r.Blocks[0].TimespanStartMS != 1000 ||
-		r.Blocks[0].TimespanEndMS == nil || *r.Blocks[0].TimespanEndMS != 2000 {
-		t.Errorf("timespan = %v..%v, want 1000..2000", r.Blocks[0].TimespanStartMS, r.Blocks[0].TimespanEndMS)
-	}
-	if r.Blocks[1].TimespanStartMS != nil {
-		t.Error("a block with no timespan should omit it")
-	}
-	if !r.Blocks[1].HasRegion || !r.Blocks[1].HasExtent {
-		t.Errorf("region/extent scope not reported: %+v", r.Blocks[1])
-	}
+	assertScopedBlock(t, r.Blocks[0], []byte{1, 2, 3}, 1000, 2000)
+	assertUnscopedBlock(t, r.Blocks[1], []byte{4})
+
 	if line := r.summarize(); !strings.Contains(line, "not on this build's copy") || !strings.Contains(line, "2 block(s)") {
 		t.Errorf("summary line = %q", line)
 	}
 	if line := reports[1].summarize(); !strings.Contains(line, "MALFORMED") {
 		t.Errorf("a malformed soft binding must say so: %q", line)
+	}
+}
+
+// assertScopedBlock checks a block carrying a timespan.
+func assertScopedBlock(t *testing.T, b SoftBindingBlockReport, wantValue []byte, start, end uint64) {
+	t.Helper()
+	if b.Value != base64.StdEncoding.EncodeToString(wantValue) {
+		t.Errorf("value = %q, want base64 of %x", b.Value, wantValue)
+	}
+	if b.TimespanStartMS == nil || b.TimespanEndMS == nil {
+		t.Fatalf("timespan lost: %+v", b)
+	}
+	if *b.TimespanStartMS != start || *b.TimespanEndMS != end {
+		t.Errorf("timespan = %d..%d, want %d..%d", *b.TimespanStartMS, *b.TimespanEndMS, start, end)
+	}
+}
+
+// assertUnscopedBlock checks a block with a region and the deprecated extent,
+// both of which are reported as present without being decoded.
+func assertUnscopedBlock(t *testing.T, b SoftBindingBlockReport, wantValue []byte) {
+	t.Helper()
+	if b.Value != base64.StdEncoding.EncodeToString(wantValue) {
+		t.Errorf("value = %q, want base64 of %x", b.Value, wantValue)
+	}
+	if b.TimespanStartMS != nil {
+		t.Error("a block with no timespan should omit it")
+	}
+	if !b.HasRegion || !b.HasExtent {
+		t.Errorf("region/extent scope not reported: %+v", b)
 	}
 }
