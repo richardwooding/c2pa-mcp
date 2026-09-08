@@ -183,8 +183,9 @@ type SignRequest struct {
 	DigitalSourceType string
 	// SoftBinding names a soft binding to compute and write ALONGSIDE the hard
 	// binding, which every signed asset still gets: SoftBindingISCC ("iscc",
-	// an ISO 24138 Image-Code over a JPEG, PNG or GIF) or SoftBindingNone /
-	// "" for none. See softbinding.go for why the choice is this narrow.
+	// an ISO 24138 Image-Code over a JPEG, PNG, GIF, WebP or TIFF) or
+	// SoftBindingNone / "" for none. See softbinding.go for why the choice of
+	// algorithm is this narrow, and what a WAV or a DNG gets instead.
 	SoftBinding string
 }
 

@@ -19,3 +19,16 @@ with `WithSigningTrust`. The `verify` path here uses the embedded production
 C2PA trust list by default, so this fixture is expected to report
 `signingCredential.untrusted` (a failure) unless a matching trust pool is
 supplied. Tests assert the *structure* of the result accordingly.
+
+## sample.webp
+
+A 5 KB lossy WebP (simple format, one `VP8 ` chunk) of the 200×133 photograph from
+[iscc/iscc-samples](https://github.com/iscc/iscc-samples), by Titusz Pan, **CC-BY-4.0** — the same
+image the `fingerprint` module uses as its ISCC oracle, encoded to WebP with libwebp 1.6.0 via
+sharp. A derivative of a CC-BY-4.0 work.
+
+It is checked in because **Go can decode a WebP but not write one**, so unlike the JPEG, PNG, GIF and
+TIFF assets in these tests it cannot be synthesised in memory. It exists to prove one thing that
+nothing else can: c2pa's RIFF embedder synthesises a `VP8X` chunk when signing a simple-format WebP,
+restructuring the container around the bitstream, and the ISCC recomputed from the *signed* file must
+still equal the one in its own assertion — otherwise a resolver would never match it.

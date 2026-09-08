@@ -33,7 +33,7 @@ const (
 	SoftBindingNone = "none"
 	// SoftBindingISCC computes an ISCC Image-Code (ISO 24138), registered on
 	// the C2PA soft binding algorithm list as io.iscc.v0 — the one open,
-	// general-purpose fingerprint on it.
+	// general-purpose fingerprint on it. JPEG, PNG, GIF, WebP and TIFF.
 	SoftBindingISCC = "iscc"
 )
 
@@ -48,16 +48,50 @@ const isccAlgorithm = "io.iscc.v0"
 // only thing a soft binding is for.
 const isccBits = 64
 
-// isccContainers are the containers this binary can turn into pixels:
-// fingerprint registers GIF, JPEG and PNG with image.Decode. WebP (RIFF),
-// TIFF, HEIC and AVIF (BMFF) are perfectly good C2PA carriers and are signed
-// as usual — they just cannot be decoded here, and a code computed from the
-// wrong pixels is silently wrong rather than an error, so this refuses instead
-// of guessing.
-var isccContainers = map[c2pa.Container]bool{
-	c2pa.JPEG: true,
-	c2pa.PNG:  true,
-	c2pa.GIF:  true,
+// isccDecodable reports whether an asset in this container is one this build
+// can turn into pixels, given its leading bytes.
+//
+// The bytes are needed because a c2pa.Container names a CARRIER, not a media
+// type: c2pa.RIFF is WebP *and* WAV *and* AVI, c2pa.TIFF is TIFF and BigTIFF
+// and DNG, and c2pa.BMFF is MP4 alongside HEIC and AVIF. The c2pa library
+// parses the RIFF form type but keeps it private, and nothing it exports says
+// "this is a WebP" — Info.Format is producer-declared and empty before signing
+// — so the form type is read here, at offset 8, the way file-search-on's
+// imagetype.go reads it.
+//
+// TIFF passes on the container alone even though several TIFF layouts are
+// undecodable: fingerprint refuses those WITH A REASON (a DNG, separate colour
+// planes, BigTIFF), which is more useful than anything four bytes could say
+// here. HEIC and AVIF have no pure-Go decoder at all, so BMFF is refused.
+func isccDecodable(container c2pa.Container, data []byte) bool {
+	switch container {
+	case c2pa.JPEG, c2pa.PNG, c2pa.GIF, c2pa.TIFF:
+		return true
+	case c2pa.RIFF:
+		return isWebP(data)
+	default:
+		return false
+	}
+}
+
+// isWebP reports whether a RIFF file's form type is WEBP rather than WAVE or
+// AVI. All three are the same carrier to c2pa, and only one is an image.
+func isWebP(data []byte) bool {
+	return len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP"
+}
+
+// isccFormatDetail names what the asset actually is, for a refusal message. A
+// bare container name would tell a user with a WAV that "this asset is riff",
+// which is true and useless.
+func isccFormatDetail(container c2pa.Container) string {
+	switch container {
+	case c2pa.RIFF:
+		return "a RIFF container that is not a WebP, so a WAV or an AVI"
+	case c2pa.BMFF:
+		return "BMFF — an MP4, or a HEIC/AVIF, which needs a decoder that does not exist in pure Go"
+	default:
+		return string(container)
+	}
 }
 
 var (
@@ -66,7 +100,7 @@ var (
 	ErrSoftBindingAlgorithm = errors.New(`soft binding must be "iscc" (ISO 24138, io.iscc.v0) or "none"`)
 	// ErrSoftBindingFormat is returned when the algorithm is one this tool can
 	// compute but the asset is not one it can compute it over.
-	ErrSoftBindingFormat = errors.New("an ISCC Image-Code needs a still image this build can decode: JPEG, PNG or GIF")
+	ErrSoftBindingFormat = errors.New("an ISCC Image-Code needs a still image this build can decode: JPEG, PNG, GIF, WebP or TIFF")
 )
 
 // softBindingFor computes the soft binding named by alg over the asset bytes,
@@ -90,8 +124,8 @@ func softBindingFor(alg string, container c2pa.Container, data []byte) (*c2pa.So
 	default:
 		return nil, "", fmt.Errorf("%w: got %q", ErrSoftBindingAlgorithm, alg)
 	}
-	if !isccContainers[container] {
-		return nil, "", fmt.Errorf("%w (this asset is %s)", ErrSoftBindingFormat, container)
+	if !isccDecodable(container, data) {
+		return nil, "", fmt.Errorf("%w (this asset is %s)", ErrSoftBindingFormat, isccFormatDetail(container))
 	}
 
 	// The normalisation — EXIF transpose, flatten onto white, trim the border,

@@ -7,7 +7,8 @@ require (
 	github.com/iscc/iscc-lib/packages/go v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/richardwooding/c2pa v0.21.0
-	github.com/richardwooding/fingerprint v0.2.0
+	github.com/richardwooding/fingerprint v0.3.0
+	golang.org/x/image v0.41.0
 )
 
 require (
@@ -22,7 +23,6 @@ require (
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
-	golang.org/x/image v0.41.0 // indirect
 	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect

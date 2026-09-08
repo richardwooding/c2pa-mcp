@@ -25,7 +25,8 @@ Three operations mirror the library's three modes:
   library validates its own output before writing a byte, so a sign either produces a file that
   verifies or produces nothing; a failure IS an error (exit 1 / tool error), unlike an invalid
   manifest under verify. `--soft-binding iscc` / `soft_binding: "iscc"` ALSO writes a
-  `c2pa.soft-binding` assertion (see the soft-binding notes below); the hard binding is unaffected.
+  `c2pa.soft-binding` assertion over a JPEG, PNG, GIF, WebP or TIFF (see the soft-binding notes
+  below); the hard binding is unaffected.
 
 Requires Go 1.26+.
 
@@ -98,11 +99,18 @@ Three layers, one shared core:
     that arrangement for `io.iscc.v0` — ISO 24138 — via `fingerprint.ISCCPixelsFromReader` (the
     normalisation, which is Pillow's arithmetic reproduced in Go) and `iscc-lib` (the code). What to
     know before touching it:
-      - **It is gated on the container, not attempted and caught.** `isccContainers` is JPEG/PNG/GIF
-        — what `fingerprint` registers with `image.Decode`. WebP/TIFF/HEIC/AVIF are signable C2PA
-        carriers this build cannot decode, and a code computed from the wrong pixels is silently
-        wrong rather than an error, so it refuses. Adding a format means adding a decoder AND
-        satisfying yourself that it agrees with Pillow's, which is what conformance rests on.
+      - **The gate cannot be a map keyed on `c2pa.Container`**, which is what it was until WebP
+        and TIFF arrived. A Container names a CARRIER, not a media type: `c2pa.RIFF` is WebP *and*
+        WAV *and* AVI, `c2pa.TIFF` is TIFF and BigTIFF and DNG, `c2pa.BMFF` is MP4 alongside
+        HEIC/AVIF. The c2pa library parses the RIFF form type (`riff.go`) but keeps it private, and
+        nothing it exports says "this is a WebP" — `Info.Format` is producer-declared and empty
+        before signing. So `isccDecodable(container, data)` reads the form type itself at offset 8,
+        the way `file-search-on`'s `imagetype.go` does. TIFF passes on the container alone
+        deliberately: `fingerprint` refuses a DNG, a planar file or BigTIFF WITH A REASON, which is
+        more use than anything four bytes could say here.
+      - Adding a format means adding a decoder in `fingerprint` AND satisfying yourself that it
+        agrees with Pillow's, which is what conformance rests on — see that repo's CLAUDE.md for
+        the "exactness follows the codec, not the container" argument the tests are built on.
       - **The value is the raw ISCC-UNIT digest; the canonical `ISCC:…` string goes in `name`.**
         A documented CHOICE — the spec says only "algorithm specific format" and the registry entry
         defines none. The reasoning lives in the `c2pa` library's CLAUDE.md; this function and that
@@ -140,7 +148,14 @@ encoded in-memory with `image/jpeg` / `image/png`; the only fixture is the signe
 which the signing tests re-sign (auto → `opened`, prior manifest chained). The soft-binding tests
 need an image with real structure — `isccScene`, 96x96 — because the 16x16 gradient the other tests
 use normalises to something a re-encode can move; they assert a Hamming BOUND (4 of 64 bits) and log
-the actual distance, which was 0 across JPEG q75, JPEG q40 and a palette GIF when written.
+the actual distance, which was 0 across JPEG q75, JPEG q40, a palette GIF and TIFF when written.
+**WebP is the one format needing a checked-in fixture** (`testdata/sample.webp`): Go can decode a
+WebP but not write one, so it cannot be synthesised like the others. Its test earns its keep — c2pa's
+RIFF embedder SYNTHESISES a VP8X chunk for a simple-format WebP, restructuring the container around
+the bitstream, and `TestSignSoftBindingWebP` recomputes the code from the SIGNED file to prove that
+did not move a pixel. A DNG for the refusal test is built by splicing a `DNGVersion` entry into a
+`tiff.Encode` output (`withTIFFTag`, which also shifts the value offsets past the insertion) rather
+than by vendoring a camera raw.
 
 ## Releasing
 

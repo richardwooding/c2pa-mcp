@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"image"
 	"image/color"
@@ -21,6 +22,7 @@ import (
 	iscc "github.com/iscc/iscc-lib/packages/go"
 	"github.com/richardwooding/c2pa"
 	"github.com/richardwooding/fingerprint"
+	"golang.org/x/image/tiff"
 )
 
 // isccScene is a 96x96 image with enough structure for an Image-Code to be
@@ -54,6 +56,9 @@ func isccSceneAssets(t *testing.T) map[c2pa.Container][]byte {
 		c2pa.PNG:  encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return png.Encode(w, img) }),
 		c2pa.JPEG: encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return jpeg.Encode(w, img, nil) }),
 		c2pa.GIF:  encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return gif.Encode(w, img, nil) }),
+		// x/image/tiff writes uncompressed little-endian RGB, which is enough
+		// to sign; WebP has no Go encoder, so it needs the fixture below.
+		c2pa.TIFF: encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return tiff.Encode(w, img, nil) }),
 	}
 }
 
@@ -142,39 +147,46 @@ func TestSignSoftBindingISCC(t *testing.T) {
 	signer, _ := testSigner(t, nil)
 	for container, asset := range assets {
 		t.Run(string(container), func(t *testing.T) {
-			wantCode, wantDigest := isccOf(t, asset)
-
-			var out bytes.Buffer
-			res, err := signer.Sign(context.Background(), container, bytes.NewReader(asset), &out,
-				SignRequest{Title: "scene", SoftBinding: SoftBindingISCC})
-			if err != nil {
-				t.Fatalf("Sign: %v", err)
-			}
-			if res.SoftBinding != wantCode || !strings.HasPrefix(res.SoftBinding, "ISCC:") {
-				t.Errorf("SoftBinding = %q, want the ISCC %q", res.SoftBinding, wantCode)
-			}
-			// §9.1: a soft binding never replaces the hard one.
-			if !res.Verify.Valid || res.Verify.Binding != "verified" {
-				t.Fatalf("output valid = %v, binding = %q; want a verified hard binding too", res.Verify.Valid, res.Verify.Binding)
-			}
-			if len(res.Verify.SoftBindings) != 1 {
-				t.Fatalf("read back %d soft bindings, want 1", len(res.Verify.SoftBindings))
-			}
-
-			sb := res.Verify.SoftBindings[0]
-			assertFields(t, softBindingFields(sb), map[string]string{
-				"label":          "c2pa.soft-binding",
-				"algorithm":      isccAlgorithm,
-				"algorithm type": "fingerprint",
-				"registered":     "true",  // io.iscc.v0 is on the embedded C2PA list
-				"from claim":     "false", // written per assertion, not as the claim's alg_soft
-				"well formed":    "true",
-				"name":           wantCode, // the canonical string, for humans
-				"url":            "",       // deprecated; this writer emits none
-			})
-			assertISCCBlock(t, sb, wantDigest)
+			assertSignsWithISCC(t, signer, container, asset)
 		})
 	}
+}
+
+// assertSignsWithISCC signs one asset with a soft binding and checks everything
+// a verifier should then read back out of it.
+func assertSignsWithISCC(t *testing.T, signer *Signer, container c2pa.Container, asset []byte) {
+	t.Helper()
+	wantCode, wantDigest := isccOf(t, asset)
+
+	var out bytes.Buffer
+	res, err := signer.Sign(context.Background(), container, bytes.NewReader(asset), &out,
+		SignRequest{Title: "scene", SoftBinding: SoftBindingISCC})
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if res.SoftBinding != wantCode || !strings.HasPrefix(res.SoftBinding, "ISCC:") {
+		t.Errorf("SoftBinding = %q, want the ISCC %q", res.SoftBinding, wantCode)
+	}
+	// §9.1: a soft binding never replaces the hard one.
+	if !res.Verify.Valid || res.Verify.Binding != "verified" {
+		t.Fatalf("output valid = %v, binding = %q; want a verified hard binding too", res.Verify.Valid, res.Verify.Binding)
+	}
+	if len(res.Verify.SoftBindings) != 1 {
+		t.Fatalf("read back %d soft bindings, want 1", len(res.Verify.SoftBindings))
+	}
+
+	sb := res.Verify.SoftBindings[0]
+	assertFields(t, softBindingFields(sb), map[string]string{
+		"label":          "c2pa.soft-binding",
+		"algorithm":      isccAlgorithm,
+		"algorithm type": "fingerprint",
+		"registered":     "true",  // io.iscc.v0 is on the embedded C2PA list
+		"from claim":     "false", // written per assertion, not as the claim's alg_soft
+		"well formed":    "true",
+		"name":           wantCode, // the canonical string, for humans
+		"url":            "",       // deprecated; this writer emits none
+	})
+	assertISCCBlock(t, sb, wantDigest)
 }
 
 // TestSoftBindingRecomputableFromSignedAsset is the property the whole feature
@@ -203,9 +215,13 @@ func TestSoftBindingSurvivesReencoding(t *testing.T) {
 	_, want := isccOf(t, base)
 
 	reencodings := map[string][]byte{
-		"jpeg default": encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return jpeg.Encode(w, img, nil) }),
-		"jpeg q40":     encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return jpeg.Encode(w, img, &jpeg.Options{Quality: 40}) }),
-		"gif palette":  encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return gif.Encode(w, img, nil) }),
+		"jpeg default":  encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return jpeg.Encode(w, img, nil) }),
+		"jpeg q40":      encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return jpeg.Encode(w, img, &jpeg.Options{Quality: 40}) }),
+		"gif palette":   encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return gif.Encode(w, img, nil) }),
+		"tiff lossless": encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return tiff.Encode(w, img, nil) }),
+		"tiff deflate": encodeScene(t, func(w *bytes.Buffer, img image.Image) error {
+			return tiff.Encode(w, img, &tiff.Options{Compression: tiff.Deflate})
+		}),
 	}
 	for name, asset := range reencodings {
 		t.Run(name, func(t *testing.T) {
@@ -251,11 +267,14 @@ func TestSoftBindingForRefusals(t *testing.T) {
 		{"unknown algorithm", "phash", c2pa.PNG, pngAsset, ErrSoftBindingAlgorithm},
 		{"a watermark we cannot compute", "com.digimarc.v1", c2pa.PNG, pngAsset, ErrSoftBindingAlgorithm},
 		{"pdf", SoftBindingISCC, c2pa.PDF, nil, ErrSoftBindingFormat},
-		{"mp4", SoftBindingISCC, c2pa.BMFF, nil, ErrSoftBindingFormat},
-		{"webp", SoftBindingISCC, c2pa.RIFF, nil, ErrSoftBindingFormat},
-		{"tiff", SoftBindingISCC, c2pa.TIFF, nil, ErrSoftBindingFormat},
+		{"mp4 or heic — same container to c2pa", SoftBindingISCC, c2pa.BMFF, nil, ErrSoftBindingFormat},
 		{"svg", SoftBindingISCC, c2pa.SVG, nil, ErrSoftBindingFormat},
 		{"mp3", SoftBindingISCC, c2pa.MP3, nil, ErrSoftBindingFormat},
+		// A WAV is a c2pa.RIFF exactly as a WebP is, which is why the gate has
+		// to read the form type rather than trust the container.
+		{"wav, not webp", SoftBindingISCC, c2pa.RIFF, riffOf("WAVE"), ErrSoftBindingFormat},
+		{"avi, not webp", SoftBindingISCC, c2pa.RIFF, riffOf("AVI "), ErrSoftBindingFormat},
+		{"riff too short to name a form", SoftBindingISCC, c2pa.RIFF, []byte("RIFF"), ErrSoftBindingFormat},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -406,4 +425,139 @@ func assertUnscopedBlock(t *testing.T, b SoftBindingBlockReport, wantValue []byt
 	if !b.HasRegion || !b.HasExtent {
 		t.Errorf("region/extent scope not reported: %+v", b)
 	}
+}
+
+// riffOf builds the smallest RIFF file that names a form type, which is all the
+// gate reads.
+func riffOf(form string) []byte {
+	return append([]byte("RIFF\x00\x00\x00\x00"), form...)
+}
+
+// TestSignSoftBindingWebP is the format that needed a real file: Go can decode
+// a WebP but not write one, so this drives a genuine libwebp-encoded asset all
+// the way through.
+//
+// The assertion that matters is the recompute: c2pa's RIFF embedder SYNTHESISES
+// a VP8X chunk for a simple-format WebP, restructuring the container around the
+// bitstream. If that moved a single pixel — or if x/image could not read the
+// result back — the code recovered from the signed file would differ from the
+// one in its own assertion, and a resolver would never match it.
+func TestSignSoftBindingWebP(t *testing.T) {
+	asset, err := os.ReadFile("../../testdata/sample.webp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isWebP(asset) {
+		t.Fatal("fixture is not a WebP")
+	}
+	wantCode, wantDigest := isccOf(t, asset)
+
+	signer, _ := testSigner(t, nil)
+	var out bytes.Buffer
+	res, err := signer.Sign(context.Background(), c2pa.RIFF, bytes.NewReader(asset), &out,
+		SignRequest{Title: "webp", SoftBinding: SoftBindingISCC})
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if res.SoftBinding != wantCode {
+		t.Errorf("SoftBinding = %q, want %q", res.SoftBinding, wantCode)
+	}
+	if !res.Verify.Valid || res.Verify.Binding != "verified" {
+		t.Fatalf("output valid = %v, binding = %q", res.Verify.Valid, res.Verify.Binding)
+	}
+	if len(res.Verify.SoftBindings) != 1 {
+		t.Fatalf("read back %d soft bindings, want 1", len(res.Verify.SoftBindings))
+	}
+	assertISCCBlock(t, res.Verify.SoftBindings[0], wantDigest)
+
+	// Embedding a manifest must not move the content it describes.
+	recomputed, _ := isccOf(t, out.Bytes())
+	if recomputed != wantCode {
+		t.Errorf("recomputing over the SIGNED WebP gives %s, the assertion says %s", recomputed, wantCode)
+	}
+}
+
+// TestSignSoftBindingTIFF signs the container whose refusals live one module
+// away, and checks the code survives the new last IFD c2pa links in.
+func TestSignSoftBindingTIFF(t *testing.T) {
+	asset := encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return tiff.Encode(w, img, nil) })
+	wantCode, _ := isccOf(t, asset)
+
+	signer, _ := testSigner(t, nil)
+	var out bytes.Buffer
+	res, err := signer.Sign(context.Background(), c2pa.TIFF, bytes.NewReader(asset), &out,
+		SignRequest{SoftBinding: SoftBindingISCC})
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if res.SoftBinding != wantCode {
+		t.Errorf("SoftBinding = %q, want %q", res.SoftBinding, wantCode)
+	}
+	if recomputed, _ := isccOf(t, out.Bytes()); recomputed != wantCode {
+		t.Errorf("recomputing over the SIGNED TIFF gives %s, want %s", recomputed, wantCode)
+	}
+}
+
+// TestSoftBindingRefusesMisleadingTIFF: fingerprint refuses the TIFF layouts
+// x/image misreads, and the reason has to reach the user rather than being
+// flattened into "unsupported".
+func TestSoftBindingRefusesMisleadingTIFF(t *testing.T) {
+	// A DNG is a TIFF carrying DNGVersion (0xC612), and c2pa signs it happily.
+	dng := encodeScene(t, func(w *bytes.Buffer, img image.Image) error { return tiff.Encode(w, img, nil) })
+	dng = withTIFFTag(t, dng, 0xC612, 1, 4, 0x00000401)
+
+	_, _, err := softBindingFor(SoftBindingISCC, c2pa.TIFF, dng)
+	if err == nil {
+		t.Fatal("a DNG must not yield a code computed from its preview")
+	}
+	if !strings.Contains(err.Error(), "DNG") {
+		t.Errorf("error should name the reason, got %q", err)
+	}
+}
+
+// withTIFFTag splices one entry into a TIFF's first IFD, rewriting the entry
+// count and shifting every value offset that follows. Only tags whose value
+// fits inline are supported, which is all this test needs.
+func withTIFFTag(t *testing.T, data []byte, tag, typ uint16, count, value uint32) []byte {
+	t.Helper()
+	if string(data[:2]) != "II" {
+		t.Fatalf("expected a little-endian TIFF, got %q", data[:2])
+	}
+	bo := binary.LittleEndian
+	ifd := int(bo.Uint32(data[4:]))
+	n := int(bo.Uint16(data[ifd:]))
+
+	entry := make([]byte, 0, 12)
+	entry = bo.AppendUint16(entry, tag)
+	entry = bo.AppendUint16(entry, typ)
+	entry = bo.AppendUint32(entry, count)
+	entry = bo.AppendUint32(entry, value)
+
+	// Entries must stay sorted by tag; 0xC612 is high, so it goes last.
+	insertAt := ifd + 2 + n*12
+	out := make([]byte, 0, len(data)+12)
+	out = append(out, data[:insertAt]...)
+	out = append(out, entry...)
+	out = append(out, data[insertAt:]...)
+	bo.PutUint16(out[ifd:], uint16(n+1))
+
+	// Every offset past the insertion point moves by the 12 bytes we added.
+	for i := range n + 1 {
+		e := ifd + 2 + i*12
+		etag, etyp, ecount := bo.Uint16(out[e:]), bo.Uint16(out[e+2:]), bo.Uint32(out[e+4:])
+		if etag == tag {
+			continue
+		}
+		width := map[uint16]uint32{1: 1, 2: 1, 3: 2, 4: 4, 5: 8}[etyp]
+		if width*ecount <= 4 {
+			continue // the value is inline, not an offset
+		}
+		if v := bo.Uint32(out[e+8:]); int(v) >= insertAt {
+			bo.PutUint32(out[e+8:], v+12)
+		}
+	}
+	if v := bo.Uint32(out[4:]); int(v) >= insertAt {
+		bo.PutUint32(out[4:], v+12)
+	}
+	return out
 }
