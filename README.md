@@ -289,6 +289,12 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 The module also pins [`gorelease`](https://pkg.go.dev/golang.org/x/exp/cmd/gorelease) as a tool
 dependency (`go tool gorelease`) for semantic-version / API-compatibility checks.
 
+## Sponsor
+
+If this saves you time, you can [sponsor its maintenance](https://github.com/sponsors/richardwooding).
+Sponsorship pays for the unglamorous half — triage, dependency bumps, release plumbing — and is
+never a condition of getting help here.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). The test fixture under `testdata/` is from contentauth/c2pa-rs;
