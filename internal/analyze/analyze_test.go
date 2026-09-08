@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/richardwooding/c2pa"
@@ -181,6 +182,31 @@ func TestVerify_Default(t *testing.T) {
 	if len(res.Signers) == 0 {
 		t.Fatal("Signers is empty")
 	}
+	// The two questions come apart here, which is the point of reporting both:
+	// the signer is not trusted, so valid is false, but the bytes really are the
+	// ones this manifest signed.
+	if res.Binding != "verified" {
+		t.Fatalf("Binding = %q, want verified", res.Binding)
+	}
+	if !strings.Contains(res.Summary(), "these are the signed bytes") {
+		t.Fatalf("summary does not spell out the binding: %s", res.Summary())
+	}
+}
+
+func TestVerify_BindingWithoutManifest(t *testing.T) {
+	// A PNG with no manifest at all: nothing bound it, and "none" is not the
+	// same answer as "failed".
+	png := append([]byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}, bytes.Repeat([]byte{0}, 64)...)
+	res, err := Verify(context.Background(), c2pa.PNG, bytes.NewReader(png), VerifyOptions{})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if res.Binding != "none" {
+		t.Fatalf("Binding = %q, want none", res.Binding)
+	}
+	if !strings.Contains(res.Summary(), "no hard binding covers this asset") {
+		t.Fatalf("summary: %s", res.Summary())
+	}
 }
 
 func TestVerify_WithSigningTrust(t *testing.T) {
@@ -224,6 +250,9 @@ func TestVerify_DataHashMismatch(t *testing.T) {
 	}
 	if !hasStatus(res, "assertion.dataHash.mismatch") {
 		t.Fatalf("expected assertion.dataHash.mismatch, got statuses: %+v", res.Statuses)
+	}
+	if res.Binding != "failed" {
+		t.Fatalf("Binding = %q, want failed", res.Binding)
 	}
 }
 

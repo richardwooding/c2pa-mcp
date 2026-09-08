@@ -53,7 +53,16 @@ type VerifyResult struct {
 	// Signers is the signer chain's subject CNs, leaf first, AS PRESENTED in the
 	// manifest — populated whether or not the chain verified, so a name read from
 	// it is a claim.
-	Signers  []string     `json:"signers,omitempty"`
+	Signers []string `json:"signers,omitempty"`
+	// Binding is what the hard binding proved about THESE bytes, which is a
+	// different question from Valid: "verified" (a hard binding covered them and
+	// held), "failed" (it covered them and did not hold), "unevaluated" (one
+	// exists but this call did not check it against these bytes — a PDF manifest
+	// attached to an embedded object, an asset past the scan cap, a fragmented
+	// asset without its fragments) or "none" (nothing bound the asset at all).
+	// A manifest can be valid with an unevaluated binding, and can have a
+	// verified binding while failing on trust, so read both.
+	Binding  string       `json:"binding"`
 	Detect   DetectResult `json:"detect"` // the unverified claims, for convenience
 	Statuses []StatusInfo `json:"statuses"`
 }
@@ -95,6 +104,7 @@ func verifyWith(ctx context.Context, container c2pa.Container, r io.Reader, cfg 
 	out := VerifyResult{
 		Valid:               res.Valid,
 		ActiveManifestLabel: res.ActiveManifestLabel,
+		Binding:             res.Binding.String(),
 		Detect:              toDetectResult(res.Info),
 	}
 	if !res.SignedAt.IsZero() {
@@ -227,6 +237,7 @@ func (v VerifyResult) Summary() string {
 		b.WriteString("INVALID: C2PA validation found at least one failure.\n")
 	}
 	writeField(&b, "Active manifest", v.ActiveManifestLabel)
+	writeField(&b, "Content binding", bindingSummary(v.Binding))
 	if v.VerifiedSigner != "" {
 		writeField(&b, "Signed by (verified)", v.VerifiedSigner)
 	}
@@ -250,6 +261,23 @@ func (v VerifyResult) Summary() string {
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// bindingSummary spells out a binding state, because "unevaluated" is the one a
+// reader guesses wrong: it is neither a pass nor a failure, and a manifest can
+// be valid while nothing checked whether these are the bytes it signed.
+func bindingSummary(state string) string {
+	switch state {
+	case "verified":
+		return "verified (these are the signed bytes)"
+	case "failed":
+		return "failed (these are NOT the signed bytes)"
+	case "unevaluated":
+		return "unevaluated (nothing here proves these are the signed bytes)"
+	case "none":
+		return "none (no hard binding covers this asset)"
+	}
+	return state
 }
 
 // timeLayout is how summaries print verified and claimed times.
