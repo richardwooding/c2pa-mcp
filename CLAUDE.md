@@ -18,6 +18,9 @@ Three operations mirror the library's three modes:
   **UNVERIFIED**, no crypto — like reading EXIF.
 - **verify** — full cryptographic validation; returns an overall `valid` flag plus per-step C2PA
   §15 status codes. An *invalid manifest is a normal result* (`valid: false`), not an error.
+  It also returns `binding` (`verified`/`failed`/`unevaluated`/`none`, from
+  `c2pa.ValidationResult.Binding`), which answers the separate question "were THESE bytes the signed
+  ones" — `valid` and `binding` come apart in both directions, and neither implies the other.
 - **sign** — embed a signed `c2pa.claim.v2` manifest with the operator's key and chain. The
   library validates its own output before writing a byte, so a sign either produces a file that
   verifies or produces nothing; a failure IS an error (exit 1 / tool error), unlike an invalid
@@ -67,6 +70,12 @@ Three layers, one shared core:
     `VerifyOptions.toValidateOptions()` translates the exposed knobs (trust PEMs, online revocation,
     max scan) into `c2pa.ValidateOption`s; `verifyWith` is the shaping step both `Verify` and
     `Sign` go through, so a signed asset is reported exactly as verify would report it.
+    `VerifyResult.Binding` is `c2pa.ValidationResult.Binding.String()` — passed through, never
+    derived from `Statuses`, because the library records it at the decision point (an update
+    manifest's binding statuses carry the PARENT manifest's label, and `general.unsupported` is
+    used for several unrelated things, so no reading of the status list reconstructs it).
+    `bindingSummary` is the only place that editorialises: it spells out `unevaluated`, the state a
+    reader guesses wrong.
   - `sign.go`: `LoadSigner(SignerConfig)` parses PEM (PKCS#8 / SEC 1 / PKCS#1 keys, any number of
     CERTIFICATE blocks, other blocks skipped so one combined file works; an encrypted key is named
     as such with the openssl remedy) and builds a `c2pa.Signer` — which checks key↔leaf, chain

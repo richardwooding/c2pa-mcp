@@ -185,8 +185,23 @@ object-level manifest, spec §A.4.3), `unknown` when nothing places it at all. F
 it as the file's signer.
 
 `verify` adds `valid`, `active_manifest_label`, a verified `signed_at`, the `signers` chain
-(subject CNs, leaf first), and an ordered `statuses` list of `{code, severity, uri, explanation}`
-entries using the C2PA §15 status codes.
+(subject CNs, leaf first), `binding`, and an ordered `statuses` list of
+`{code, severity, uri, explanation}` entries using the C2PA §15 status codes.
+
+`binding` answers a different question from `valid`: were **these bytes** the ones that were signed?
+
+| `binding` | meaning |
+| --- | --- |
+| `verified` | a hard binding covered these bytes and held |
+| `failed` | a hard binding covered these bytes and did not hold |
+| `unevaluated` | a hard binding exists, and this call did not check it against these bytes — a PDF manifest attached to an embedded object (§A.4.3), an asset past the scan cap, a fragmented asset without its fragments |
+| `none` | nothing bound the asset: no manifest, or no usable hard binding |
+
+The two come apart in both directions, which is why both are reported. The fixture in `testdata`
+is `valid: false` (its test PKI is not in the production trust list) with `binding: verified` — the
+bytes really are the ones that manifest signed. A PDF whose manifest hangs off an embedded object is
+`valid: true` with `binding: unevaluated` — nothing hashed the document. `unevaluated` is not a
+weaker pass; it means ask a different question, or supply the fragments.
 
 `sign` →
 
@@ -198,7 +213,7 @@ entries using the C2PA §15 status codes.
   "timestamped": false,
   "size": 118204,
   "output": "photo-signed.jpg",
-  "verify": { "valid": true, "verified_signer": "My Signer", "...": "a VerifyResult" }
+  "verify": { "valid": true, "binding": "verified", "verified_signer": "My Signer", "...": "a VerifyResult" }
 }
 ```
 

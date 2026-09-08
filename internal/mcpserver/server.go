@@ -58,7 +58,12 @@ func New(version string, opts ...Option) *mcp.Server {
 			"Read `verified_signer` for who provably signed it — it is empty unless the signature " +
 			"verified AND the chain reached a trust anchor. `signers` is the chain as PRESENTED in " +
 			"the file and is populated even when validation failed, so it is a claim, not proof; " +
-			"the same is true of everything under `detect`.",
+			"the same is true of everything under `detect`. `binding` answers the separate question " +
+			"of whether THESE bytes are the ones that were signed: verified, failed, none (nothing " +
+			"bound the asset), or unevaluated — which is neither a pass nor a failure but \"a hard " +
+			"binding exists and this call did not check it\", as for a PDF manifest attached to an " +
+			"embedded object, an asset past the scan cap, or a fragmented asset without its " +
+			"fragments. A manifest can be valid with an unevaluated binding.",
 	}, h.verify)
 
 	if h.signer != nil {
@@ -73,6 +78,7 @@ func New(version string, opts ...Option) *mcp.Server {
 				"`output` names the file to write (required for path and url inputs; an existing file is " +
 				"refused unless `overwrite` is true); a bytes input may omit it to receive the signed asset " +
 				"as `signed_bytes`. The result's `verify` block is the c2pa library's verdict on the output, " +
+				"including the `binding` the manifest just written covers, " +
 				"anchored at the signing certificate chain and without re-validating a prior manifest — call " +
 				"verify on the output for the full picture. Anyone who can call this tool signs with the " +
 				"operator's key.",
