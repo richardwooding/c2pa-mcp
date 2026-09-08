@@ -20,8 +20,8 @@ github.com/klauspost/cpuid/v2 v2.4.0 h1:S6Hrbc7+ywsr0r+RLapfGBHfyefhCTwEh3A0tV91
 github.com/klauspost/cpuid/v2 v2.4.0/go.mod h1:19jmZ9mjzoF//ddRSUsv0zfBTJWh3QJh9FNxZTMrGxU=
 github.com/modelcontextprotocol/go-sdk v1.7.0 h1:yqjY2dsbKAC0LSuWZVBMrHgiG8ukXv6NRo0JiALay44=
 github.com/modelcontextprotocol/go-sdk v1.7.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
-github.com/richardwooding/c2pa v0.21.0 h1:Xn1GKj8dZmO6NJmZJ73sLSAya7eWmVSiKWrBtBdbiIE=
-github.com/richardwooding/c2pa v0.21.0/go.mod h1:HONKiQlbAPZ7s399wKi+ujsK74DMg1RMpSN7iF3PSWY=
+github.com/richardwooding/c2pa v0.22.0 h1:wvlfV0YcrwAPobGVrRs9Easwx2Khcpv4/C4+JgJNp0I=
+github.com/richardwooding/c2pa v0.22.0/go.mod h1:HONKiQlbAPZ7s399wKi+ujsK74DMg1RMpSN7iF3PSWY=
 github.com/richardwooding/fingerprint v0.3.1 h1:D9RAk+2aEmwua2VCHAovoXDle3JgXtoLa72zEDP1KrU=
 github.com/richardwooding/fingerprint v0.3.1/go.mod h1:VYCbaXMrpgHewwYnv8GfQoEEcnQwsKFtDlH5bTI00w0=
 github.com/segmentio/asm v1.1.3 h1:WM03sfUOENvvKexOLp+pCqgb/WDjsi7EK8gIsICtzhc=

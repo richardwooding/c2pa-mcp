@@ -6,7 +6,7 @@ require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/iscc/iscc-lib/packages/go v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
-	github.com/richardwooding/c2pa v0.21.0
+	github.com/richardwooding/c2pa v0.22.0
 	github.com/richardwooding/fingerprint v0.3.1
 	golang.org/x/image v0.41.0
 )
