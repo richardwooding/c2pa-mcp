@@ -256,15 +256,22 @@ of the `c2pa` library on purpose: it implements no soft binding algorithm, so th
 every algorithm on the list — including the 44 proprietary watermarks, which you can still write by
 handing the library your vendor's value.
 
-What it is worth is visible in the test suite: the same image as PNG, as JPEG at default quality,
-as JPEG at quality 40 and as a palette GIF all produce the **same** `ISCC:` code, while every one of
-those files has a different hard binding.
+What it is worth is visible in the test suite: the same image as PNG, as JPEG at default quality, as
+JPEG at quality 40, as a palette GIF and as TIFF all produce the **same** `ISCC:` code, while every
+one of those files has a different hard binding. `fingerprint`'s own suite pushes it further — a
+5 KB lossy WebP of a photograph whose JPEG is 35 KB moves 98% of the normalised pixels and still
+produces the same identifier.
 
 Four things to know:
 
-- **JPEG, PNG and GIF only.** WebP, TIFF, HEIC, AVIF, MP4, MP3, SVG and PDF sign as usual but
-  `--soft-binding iscc` refuses them, because this build cannot decode them to pixels and a code
-  computed from the wrong pixels is silently wrong rather than an error.
+- **Still images this build can decode: JPEG, PNG, GIF, WebP and TIFF.** Everything else signs as
+  usual but `--soft-binding iscc` refuses it, because a code computed from the wrong pixels is
+  silently wrong rather than an error. Two of those refusals are less obvious than they look:
+  a **WAV or an AVI is the same carrier as a WebP** as far as C2PA is concerned (all three are
+  RIFF), so the form type is read at offset 8 rather than trusted; and a **DNG is a TIFF**, whose
+  first image directory is a small preview rather than the photograph, so it is refused with that
+  reason — as is a TIFF that stores its colour planes separately, which Go's decoder misreads
+  without complaining. HEIC and AVIF need a decoder that does not exist in pure Go.
 - **The hard binding is still written.** §9.1 forbids a soft binding from being an asset's only
   content binding, so this adds one; it never substitutes.
 - **The assertion carries the code's raw digest**, with the canonical `ISCC:…` string in the

@@ -74,7 +74,7 @@ type SignArgs struct {
 	Title             string `json:"title,omitempty" jsonschema:"dc:title recorded in the manifest"`
 	Action            string `json:"action,omitempty" jsonschema:"First action: created (nothing preceded this asset) or opened (something did). Default: opened when the asset already carries a manifest, created otherwise"`
 	DigitalSourceType string `json:"digital_source_type,omitempty" jsonschema:"IPTC digital source type of a created asset: a full URL or a bare term such as digitalCapture, trainedAlgorithmicMedia or compositeWithTrainedAlgorithmicMedia; 'empty' is C2PA's own"`
-	SoftBinding       string `json:"soft_binding,omitempty" jsonschema:"Also write a soft binding, a perceptual identifier that survives re-encoding and lets a stripped copy be matched back to this manifest: 'iscc' computes an ISO 24138 Image-Code (io.iscc.v0) over a JPEG, PNG or GIF. Omit or 'none' for no soft binding. The hard binding is always written too"`
+	SoftBinding       string `json:"soft_binding,omitempty" jsonschema:"Also write a soft binding, a perceptual identifier that survives re-encoding and lets a stripped copy be matched back to this manifest: 'iscc' computes an ISO 24138 Image-Code (io.iscc.v0) over a JPEG, PNG, GIF, WebP or TIFF. Omit or 'none' for no soft binding. The hard binding is always written too"`
 }
 
 // errOutputRequired is the sign tool's refusal to guess where a file should go.

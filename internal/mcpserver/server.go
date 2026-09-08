@@ -87,9 +87,9 @@ func New(version string, opts ...Option) *mcp.Server {
 				"verify on the output for the full picture. Optional `soft_binding: \"iscc\"` ALSO writes a " +
 				"soft binding: an ISO 24138 ISCC Image-Code (io.iscc.v0) computed from the image content, " +
 				"which survives the re-encoding and metadata stripping that break the hard binding, so a " +
-				"copy can be matched back to this manifest through a provenance store. JPEG, PNG and GIF " +
-				"only, and the hard binding is still written — a soft binding is never an asset's only " +
-				"content binding. Anyone who can call this tool signs with the " +
+				"copy can be matched back to this manifest through a provenance store. Still images this " +
+				"build can decode only — JPEG, PNG, GIF, WebP and TIFF — and the hard binding is still " +
+				"written, since a soft binding is never an asset's only content binding. Anyone who can call this tool signs with the " +
 				"operator's key.",
 		}, h.sign)
 	}
