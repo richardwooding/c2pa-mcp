@@ -170,6 +170,7 @@ type SignCmd struct {
 	Title             string      `help:"dc:title recorded in the manifest."`
 	Action            string      `enum:"auto,created,opened" default:"auto" help:"First action: created (nothing preceded this asset), opened (something did), or auto — opened when the asset already carries a manifest, created otherwise."`
 	DigitalSourceType string      `name:"digital-source-type" help:"IPTC digital source type of a created asset: a full URL or a bare term such as digitalCapture, trainedAlgorithmicMedia or compositeWithTrainedAlgorithmicMedia; 'empty' is C2PA's own."`
+	SoftBinding       string      `name:"soft-binding" enum:"none,iscc" default:"none" help:"Also write a soft binding, a perceptual identifier that survives re-encoding: 'iscc' computes an ISO 24138 Image-Code (io.iscc.v0) over a JPEG, PNG or GIF. The hard binding is still written; verifiers report a soft binding without checking it."`
 	Force             bool        `help:"Overwrite an existing output file."`
 	JSON              bool        `help:"Emit JSON instead of a human-readable summary."`
 }
@@ -188,7 +189,7 @@ func (c *SignCmd) Run() error {
 	}
 	defer func() { _ = closer() }()
 
-	req := analyze.SignRequest{Title: c.Title, Action: c.Action, DigitalSourceType: c.DigitalSourceType}
+	req := analyze.SignRequest{Title: c.Title, Action: c.Action, DigitalSourceType: c.DigitalSourceType, SoftBinding: c.SoftBinding}
 	if c.Output == "-" {
 		res, err := signer.Sign(ctx, container, r, os.Stdout, req)
 		if err != nil {

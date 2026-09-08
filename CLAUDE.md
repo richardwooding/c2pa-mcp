@@ -24,7 +24,8 @@ Three operations mirror the library's three modes:
 - **sign** — embed a signed `c2pa.claim.v2` manifest with the operator's key and chain. The
   library validates its own output before writing a byte, so a sign either produces a file that
   verifies or produces nothing; a failure IS an error (exit 1 / tool error), unlike an invalid
-  manifest under verify.
+  manifest under verify. `--soft-binding iscc` / `soft_binding: "iscc"` ALSO writes a
+  `c2pa.soft-binding` assertion (see the soft-binding notes below); the hard binding is unaffected.
 
 Requires Go 1.26+.
 
@@ -75,7 +76,8 @@ Three layers, one shared core:
     manifest's binding statuses carry the PARENT manifest's label, and `general.unsupported` is
     used for several unrelated things, so no reading of the status list reconstructs it).
     `bindingSummary` is the only place that editorialises: it spells out `unevaluated`, the state a
-    reader guesses wrong.
+    reader guesses wrong. `VerifyResult.SoftBindings` is shaped by `toSoftBindingReports`
+    (`softbinding.go`) — reported, never checked, and the summary line says so in as many words.
   - `sign.go`: `LoadSigner(SignerConfig)` parses PEM (PKCS#8 / SEC 1 / PKCS#1 keys, any number of
     CERTIFICATE blocks, other blocks skipped so one combined file works; an encrypted key is named
     as such with the openssl remedy) and builds a `c2pa.Signer` — which checks key↔leaf, chain
@@ -90,6 +92,31 @@ Three layers, one shared core:
     `SignToFile` writes through a temp file in the target directory and renames into place, so a
     failed sign never truncates an existing file and signing a file onto itself works; an existing
     path is `ErrOutputExists` unless overwrite is set.
+  - `softbinding.go`: the ONE thing this repo computes rather than adapts. The `c2pa` library
+    implements no soft binding algorithm by design (it takes the value from its caller, so every
+    algorithm on the C2PA list works, watermarks included), so `softBindingFor` is the other half of
+    that arrangement for `io.iscc.v0` — ISO 24138 — via `fingerprint.ISCCPixelsFromReader` (the
+    normalisation, which is Pillow's arithmetic reproduced in Go) and `iscc-lib` (the code). What to
+    know before touching it:
+      - **It is gated on the container, not attempted and caught.** `isccContainers` is JPEG/PNG/GIF
+        — what `fingerprint` registers with `image.Decode`. WebP/TIFF/HEIC/AVIF are signable C2PA
+        carriers this build cannot decode, and a code computed from the wrong pixels is silently
+        wrong rather than an error, so it refuses. Adding a format means adding a decoder AND
+        satisfying yourself that it agrees with Pillow's, which is what conformance rests on.
+      - **The value is the raw ISCC-UNIT digest; the canonical `ISCC:…` string goes in `name`.**
+        A documented CHOICE — the spec says only "algorithm specific format" and the registry entry
+        defines none. The reasoning lives in the `c2pa` library's CLAUDE.md; this function and that
+        note are the two places to change if evidence ever settles it. Unverified against any
+        third-party resolver.
+      - **64 bits is not a flag.** Two producers who pick different widths cannot compare codes,
+        which is the only thing a soft binding is for.
+      - **It is computed from the asset AS IT ARRIVED**, before any manifest is embedded — and
+        `TestSoftBindingRecomputableFromSignedAsset` pins that recomputing over the SIGNED file
+        gives the same code back, which is the property the whole feature exists for.
+      - **The report has no `Matched` and no `Valid`.** `SoftBindingReport.WellFormed` is about
+        structure alone; the deprecated `url` is reported and NEVER fetched (a manifest-controlled
+        outbound request is an SSRF). The library's position is report-don't-verify, because a
+        tolerance is policy rather than fact, and this repo must not quietly upgrade it.
 
 - **`internal/mcpserver`** — wraps `analyze` as MCP tools using
   [`github.com/modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk).
@@ -110,7 +137,10 @@ Key invariant: the CLI and MCP server must behave identically — they share `an
 `analyze.Detect`, `analyze.Verify`, and `analyze.Signer` (`Sign` / `SignToFile`). Add new
 behavior in `analyze`, then expose it from both `main.go` and `mcpserver`. Unsigned test assets are
 encoded in-memory with `image/jpeg` / `image/png`; the only fixture is the signed c2pa-rs JPEG,
-which the signing tests re-sign (auto → `opened`, prior manifest chained).
+which the signing tests re-sign (auto → `opened`, prior manifest chained). The soft-binding tests
+need an image with real structure — `isccScene`, 96x96 — because the 16x16 gradient the other tests
+use normalises to something a re-encode can move; they assert a Hamming BOUND (4 of 64 bits) and log
+the actual distance, which was 0 across JPEG q75, JPEG q40 and a palette GIF when written.
 
 ## Releasing
 

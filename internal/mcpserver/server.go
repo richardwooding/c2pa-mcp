@@ -63,7 +63,11 @@ func New(version string, opts ...Option) *mcp.Server {
 			"bound the asset), or unevaluated — which is neither a pass nor a failure but \"a hard " +
 			"binding exists and this call did not check it\", as for a PDF manifest attached to an " +
 			"embedded object, an asset past the scan cap, or a fragmented asset without its " +
-			"fragments. A manifest can be valid with an unevaluated binding.",
+			"fragments. A manifest can be valid with an unevaluated binding. `soft_bindings` lists " +
+			"any perceptual identifiers the manifest carries (a watermark or a fingerprint, such as " +
+			"an ISCC) — REPORTED, never checked: matching one means recomputing it and comparing " +
+			"within a tolerance, which is a policy decision, so nothing here says the content " +
+			"matches. Do not report a soft binding as evidence of anything.",
 	}, h.verify)
 
 	if h.signer != nil {
@@ -80,7 +84,12 @@ func New(version string, opts ...Option) *mcp.Server {
 				"as `signed_bytes`. The result's `verify` block is the c2pa library's verdict on the output, " +
 				"including the `binding` the manifest just written covers, " +
 				"anchored at the signing certificate chain and without re-validating a prior manifest — call " +
-				"verify on the output for the full picture. Anyone who can call this tool signs with the " +
+				"verify on the output for the full picture. Optional `soft_binding: \"iscc\"` ALSO writes a " +
+				"soft binding: an ISO 24138 ISCC Image-Code (io.iscc.v0) computed from the image content, " +
+				"which survives the re-encoding and metadata stripping that break the hard binding, so a " +
+				"copy can be matched back to this manifest through a provenance store. JPEG, PNG and GIF " +
+				"only, and the hard binding is still written — a soft binding is never an asset's only " +
+				"content binding. Anyone who can call this tool signs with the " +
 				"operator's key.",
 		}, h.sign)
 	}

@@ -234,6 +234,66 @@ func TestSignTool_Bytes(t *testing.T) {
 	}
 }
 
+// TestSignTool_SoftBindingISCC drives the soft binding through the MCP surface,
+// then reads it back with the verify tool — the two halves an agent uses.
+func TestSignTool_SoftBindingISCC(t *testing.T) {
+	session := connect(t, WithSigner(testSigner(t)))
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "sign",
+		Arguments: map[string]any{"bytes": fixtureBase64(t), "soft_binding": "iscc"},
+	})
+	if err != nil {
+		t.Fatalf("call sign: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("sign reported tool error: %s", firstText(t, res))
+	}
+	if !strings.Contains(firstText(t, res), "Soft binding written: ISCC:") {
+		t.Fatalf("the summary should name the code written: %q", firstText(t, res))
+	}
+	var got analyze.SignResult
+	structuredInto(t, res, &got)
+	if !strings.HasPrefix(got.SoftBinding, "ISCC:") {
+		t.Fatalf("soft_binding = %q, want an ISCC: string", got.SoftBinding)
+	}
+	if len(got.Verify.SoftBindings) != 1 || got.Verify.SoftBindings[0].Algorithm != "io.iscc.v0" {
+		t.Fatalf("verify block reported %+v", got.Verify.SoftBindings)
+	}
+
+	ver, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "verify",
+		Arguments: map[string]any{"bytes": got.SignedBytes},
+	})
+	if err != nil || ver.IsError {
+		t.Fatalf("verify on signed output: %v %v", err, ver)
+	}
+	var v analyze.VerifyResult
+	structuredInto(t, ver, &v)
+	if len(v.SoftBindings) != 1 {
+		t.Fatalf("verify reported %d soft bindings, want 1", len(v.SoftBindings))
+	}
+	sb := v.SoftBindings[0]
+	if sb.Name != got.SoftBinding || !sb.WellFormed || !sb.AlgorithmRegistered || sb.AlgorithmType != "fingerprint" {
+		t.Fatalf("verify reported %+v, want the ISCC %q as a registered fingerprint", sb, got.SoftBinding)
+	}
+}
+
+// TestSignTool_SoftBindingRefused: an algorithm this build cannot compute is a
+// tool error, not a quiet sign without one.
+func TestSignTool_SoftBindingRefused(t *testing.T) {
+	session := connect(t, WithSigner(testSigner(t)))
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "sign",
+		Arguments: map[string]any{"bytes": fixtureBase64(t), "soft_binding": "com.digimarc.v1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(firstText(t, res), "soft binding must be") {
+		t.Fatalf("expected a refusal, got %v %q", res.IsError, firstText(t, res))
+	}
+}
+
 func TestSignTool_PathOutput(t *testing.T) {
 	session := connect(t, WithSigner(testSigner(t)))
 	dir := t.TempDir()
