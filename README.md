@@ -24,7 +24,9 @@ Three operations, mirroring the library's three modes:
   `valid` flag plus per-step C2PA status codes.
 - **sign** — embed a signed manifest with your own key and certificate chain, into any of the
   supported formats. An asset that already carries Content Credentials keeps them, chained as
-  the new manifest's parent. Nothing is written unless the output validates.
+  the new manifest's parent. Nothing is written unless the output validates. Optionally also
+  writes a [soft binding](#soft-bindings) — an identifier computed from the content, which
+  survives the re-encoding that breaks a hash.
 
 ## Install
 
@@ -97,6 +99,11 @@ c2pa-mcp sign photo.jpg photo.jpg --force --signing-key signer.key --signing-cer
 # Timestamp every signature with an RFC 3161 authority
 c2pa-mcp sign photo.jpg out.jpg --signing-key signer.key --signing-cert signer.crt \
   --tsa https://timestamp.digicert.com
+
+# Also write a soft binding: an ISO 24138 ISCC Image-Code computed from the
+# pixels, so a re-encoded copy can still be matched back to this manifest
+c2pa-mcp sign photo.jpg out.jpg --signing-key signer.key --signing-cert signer.crt \
+  --soft-binding iscc
 ```
 
 `--signing-key`, `--signing-cert` and `--tsa` also read `C2PA_SIGNING_KEY`, `C2PA_SIGNING_CERT`
@@ -147,7 +154,7 @@ Every tool accepts exactly one of `path`, `url`, or `bytes` (base64):
 |----------|-----------|---------|
 | `detect` | `path` \| `url` \| `bytes` | text summary + structured `DetectResult` |
 | `verify` | `path` \| `url` \| `bytes`, plus optional `online_revocation` (bool), `max_scan` (int) | text summary + structured `VerifyResult` |
-| `sign`   | `path` \| `url` \| `bytes`, `output` (path; required unless the input is `bytes`), optional `overwrite` (bool), `title`, `action` (`created` \| `opened`), `digital_source_type` | text summary + structured `SignResult` (with `signed_bytes` when no `output`) |
+| `sign`   | `path` \| `url` \| `bytes`, `output` (path; required unless the input is `bytes`), optional `overwrite` (bool), `title`, `action` (`created` \| `opened`), `digital_source_type`, `soft_binding` (`iscc`) | text summary + structured `SignResult` (with `signed_bytes` when no `output`) |
 
 `sign` exists only when the server was started with `--signing-key` and `--signing-cert`; the key
 is the **operator's**, configured at startup, never a tool argument. Anyone who can reach the
@@ -185,8 +192,9 @@ object-level manifest, spec §A.4.3), `unknown` when nothing places it at all. F
 it as the file's signer.
 
 `verify` adds `valid`, `active_manifest_label`, a verified `signed_at`, the `signers` chain
-(subject CNs, leaf first), `binding`, and an ordered `statuses` list of
-`{code, severity, uri, explanation}` entries using the C2PA §15 status codes.
+(subject CNs, leaf first), `binding`, any `soft_bindings` (see [below](#soft-bindings)), and an
+ordered `statuses` list of `{code, severity, uri, explanation}` entries using the C2PA §15 status
+codes.
 
 `binding` answers a different question from `valid`: were **these bytes** the ones that were signed?
 
@@ -211,6 +219,7 @@ weaker pass; it means ask a different question, or supply the fragments.
   "action": "c2pa.created",
   "chained_prior_manifest": false,
   "timestamped": false,
+  "soft_binding": "ISCC:EEA4GQZQTY6J5DTH",
   "size": 118204,
   "output": "photo-signed.jpg",
   "verify": { "valid": true, "binding": "verified", "verified_signer": "My Signer", "...": "a VerifyResult" }
@@ -218,11 +227,57 @@ weaker pass; it means ask a different question, or supply the fragments.
 ```
 
 `action` is the first action written; `chained_prior_manifest` says the asset already carried a
-manifest, now the new one's `parentOf` ingredient; `verify` is the library's verdict on the
+manifest, now the new one's `parentOf` ingredient; `soft_binding` is the identifier written when one
+was asked for; `verify` is the library's verdict on the
 **output**, anchored at the signing chain's own top certificate and without descending into a prior
 manifest — the library refuses to write anything that fails this check, so `valid` is
 confirmation. Run `verify` on the file for the full picture, including how a prior manifest fares
 against the trust list.
+
+## Soft bindings
+
+A hard binding is a hash of the bytes, so it dies the moment a platform re-encodes an image or
+strips its metadata — the standard criticism of C2PA, and the spec's own answer is the
+`c2pa.soft-binding` assertion (§18.10): an identifier computed from the **content**, so a stripped
+or re-encoded copy can still be matched back to its manifest through a provenance store (§9.3.1).
+
+```sh
+c2pa-mcp sign photo.jpg out.jpg --signing-key signer.key --signing-cert signer.crt --soft-binding iscc
+#   Soft binding written: ISCC:EEA4GQZQTY6J5DTH
+```
+
+`iscc` computes an **ISO 24138 Image-Code**, registered on the [C2PA soft binding algorithm
+list](https://github.com/c2pa-org/softbinding-algorithm-list) as `io.iscc.v0` — the one open,
+general-purpose fingerprint on it. The normalisation the standard assumes (EXIF transpose, flatten
+onto white, trim the border, greyscale, resample to 32×32) comes from
+[`fingerprint`](https://github.com/richardwooding/fingerprint) and the code itself from
+[`iscc-lib`](https://github.com/iscc/iscc-lib), the official pure-Go implementation. Both stay out
+of the `c2pa` library on purpose: it implements no soft binding algorithm, so that it works with
+every algorithm on the list — including the 44 proprietary watermarks, which you can still write by
+handing the library your vendor's value.
+
+What it is worth is visible in the test suite: the same image as PNG, as JPEG at default quality,
+as JPEG at quality 40 and as a palette GIF all produce the **same** `ISCC:` code, while every one of
+those files has a different hard binding.
+
+Four things to know:
+
+- **JPEG, PNG and GIF only.** WebP, TIFF, HEIC, AVIF, MP4, MP3, SVG and PDF sign as usual but
+  `--soft-binding iscc` refuses them, because this build cannot decode them to pixels and a code
+  computed from the wrong pixels is silently wrong rather than an error.
+- **The hard binding is still written.** §9.1 forbids a soft binding from being an asset's only
+  content binding, so this adds one; it never substitutes.
+- **The assertion carries the code's raw digest**, with the canonical `ISCC:…` string in the
+  assertion's `name`. That split is a decision, not a rule — the spec says only "algorithm specific
+  format" and the registry entry for `io.iscc.v0` defines none. The reasoning is written down in the
+  [`c2pa` library's README](https://github.com/richardwooding/c2pa#signing), and it is unverified
+  against any third-party resolver, there being none to verify against.
+- **Verifiers report a soft binding; they do not check it.** `verify` lists them under
+  `soft_bindings` with the algorithm, whether it is on the embedded copy of the C2PA list, and the
+  value — and says `REPORTED not verified`, because matching one means recomputing it and comparing
+  within a *tolerance*, and a tolerance is a policy rather than a fact. c2pa-rs's `c2patool` does
+  the same: it prints the assertion and its verdict is unchanged either way. A soft binding is a
+  lead to follow, never evidence on its own.
 
 ## Signing
 

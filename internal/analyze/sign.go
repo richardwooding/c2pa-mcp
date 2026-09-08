@@ -181,6 +181,11 @@ type SignRequest struct {
 	// or compositeWithTrainedAlgorithmicMedia, which is completed to the IPTC
 	// NewsCodes URL; "empty" is C2PA's own http://c2pa.org/digitalsourcetype/empty.
 	DigitalSourceType string
+	// SoftBinding names a soft binding to compute and write ALONGSIDE the hard
+	// binding, which every signed asset still gets: SoftBindingISCC ("iscc",
+	// an ISO 24138 Image-Code over a JPEG, PNG or GIF) or SoftBindingNone /
+	// "" for none. See softbinding.go for why the choice is this narrow.
+	SoftBinding string
 }
 
 // SignResult is the JSON-serializable outcome of a Sign call.
@@ -200,6 +205,11 @@ type SignResult struct {
 	// SignedBytes is the signed asset, base64, when the caller asked for it
 	// inline instead of a file.
 	SignedBytes string `json:"signed_bytes,omitempty"`
+	// SoftBinding is the canonical identifier of the soft binding written, when
+	// one was asked for — the "ISCC:…" string for SoftBindingISCC. The
+	// assertion itself carries that code's raw digest, and Verify.SoftBindings
+	// below is what a verifier reads back out of the signed asset.
+	SoftBinding string `json:"soft_binding,omitempty"`
 	// Verify is the library's verdict on the OUTPUT, anchored at the signing
 	// chain's own top certificate and WITHOUT descending into a prior manifest
 	// (the c2pa library already refuses to write anything that fails this
@@ -257,12 +267,23 @@ func (s *Signer) Sign(ctx context.Context, container c2pa.Container, r io.Reader
 		return SignResult{}, fmt.Errorf("%w: got %q", ErrBadAction, req.Action)
 	}
 
+	// Computed from the asset as it arrived, before anything is embedded: a
+	// soft binding describes the CONTENT, and the manifest a signer is about to
+	// add is not part of it.
+	softBinding, softBindingCode, err := softBindingFor(req.SoftBinding, container, data)
+	if err != nil {
+		return SignResult{}, err
+	}
+
 	m := c2pa.Manifest{
 		Title: req.Title,
 		Actions: []c2pa.Action{{
 			Action:            action,
 			DigitalSourceType: digitalSourceTypeURL(req.DigitalSourceType),
 		}},
+	}
+	if softBinding != nil {
+		m.SoftBindings = []c2pa.SoftBindingInfo{*softBinding}
 	}
 	var signed bytes.Buffer
 	if err := s.signer.Sign(ctx, container, bytes.NewReader(data), &signed, m); err != nil {
@@ -274,6 +295,7 @@ func (s *Signer) Sign(ctx context.Context, container c2pa.Container, r io.Reader
 		Action:               action,
 		ChainedPriorManifest: present && action == c2pa.ActionOpened,
 		Timestamped:          s.tsa != "",
+		SoftBinding:          softBindingCode,
 		Size:                 signed.Len(),
 		Verify: verifyWith(ctx, container, bytes.NewReader(signed.Bytes()),
 			c2pa.WithSigningTrust(s.pool), c2pa.WithMaxIngredientDepth(0), c2pa.WithOnlineRevocation(false)),
@@ -341,6 +363,7 @@ func (r SignResult) Summary() string {
 	writeField(&b, "Active manifest", r.Verify.ActiveManifestLabel)
 	writeField(&b, "Prior manifest chained as parentOf", boolStr(r.ChainedPriorManifest))
 	writeField(&b, "Timestamped", boolStr(r.Timestamped))
+	writeField(&b, "Soft binding written", r.SoftBinding)
 	if r.Verify.SignedAt != nil {
 		writeField(&b, "Signed at (verified)", r.Verify.SignedAt.Format(timeLayout))
 	}

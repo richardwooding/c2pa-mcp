@@ -62,9 +62,14 @@ type VerifyResult struct {
 	// asset without its fragments) or "none" (nothing bound the asset at all).
 	// A manifest can be valid with an unevaluated binding, and can have a
 	// verified binding while failing on trust, so read both.
-	Binding  string       `json:"binding"`
-	Detect   DetectResult `json:"detect"` // the unverified claims, for convenience
-	Statuses []StatusInfo `json:"statuses"`
+	Binding string `json:"binding"`
+	// SoftBindings are the active manifest's soft bindings (c2pa.soft-binding):
+	// perceptual identifiers that let a re-encoded or stripped copy be matched
+	// back to this manifest. They are REPORTED, never checked — see
+	// SoftBindingReport — so they say nothing about Valid or Binding.
+	SoftBindings []SoftBindingReport `json:"soft_bindings,omitempty"`
+	Detect       DetectResult        `json:"detect"` // the unverified claims, for convenience
+	Statuses     []StatusInfo        `json:"statuses"`
 }
 
 // VerifyOptions is the common subset of c2pa.ValidateOption controls exposed by
@@ -105,6 +110,7 @@ func verifyWith(ctx context.Context, container c2pa.Container, r io.Reader, cfg 
 		Valid:               res.Valid,
 		ActiveManifestLabel: res.ActiveManifestLabel,
 		Binding:             res.Binding.String(),
+		SoftBindings:        toSoftBindingReports(res.SoftBindings),
 		Detect:              toDetectResult(res.Info),
 	}
 	if !res.SignedAt.IsZero() {
@@ -249,6 +255,9 @@ func (v VerifyResult) Summary() string {
 	}
 	if v.Detect.AIGenerated {
 		writeField(&b, "AI generated", "yes")
+	}
+	for _, sb := range v.SoftBindings {
+		writeField(&b, "Soft binding", sb.summarize())
 	}
 	if len(v.Statuses) > 0 {
 		b.WriteString("Statuses:\n")
