@@ -74,12 +74,14 @@ func (c *DetectCmd) Run() error {
 
 // VerifyCmd implements `c2pa-mcp verify`.
 type VerifyCmd struct {
-	File             string `arg:"" default:"-" help:"Asset file (JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF), or '-' for stdin."`
-	JSON             bool   `help:"Emit JSON instead of a human-readable summary."`
-	SigningTrust     string `help:"Path to a PEM bundle overriding the embedded signing-anchor trust list." type:"existingfile"`
-	TimestampTrust   string `help:"Path to a PEM bundle overriding the embedded timestamp-authority trust list." type:"existingfile"`
-	OnlineRevocation bool   `help:"Enable OCSP/CRL revocation checks over the network (soft-fail)."`
-	MaxScan          int    `help:"Override the maximum number of leading bytes to read (0 = library default)."`
+	File             string   `arg:"" default:"-" help:"Asset file (JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF), or '-' for stdin."`
+	JSON             bool     `help:"Emit JSON instead of a human-readable summary."`
+	SigningTrust     string   `help:"Path to a PEM bundle overriding the embedded signing-anchor trust list." type:"existingfile"`
+	TimestampTrust   string   `help:"Path to a PEM bundle overriding the embedded timestamp-authority trust list." type:"existingfile"`
+	IdentityTrust    string   `name:"identity-trust" help:"PEM bundle of certificate authorities that PROVE a named actor (CAWG identity anchors). Without it every identity is well-formed and its actor unproven." type:"existingfile"`
+	IdentityIssuer   []string `name:"identity-issuer" help:"DID of an identity claims aggregator to believe, repeatable. Naming any makes a credential from an aggregator NOT named a failure; naming none leaves issuer trust unevaluated."`
+	OnlineRevocation bool     `help:"Enable OCSP/CRL revocation checks over the network (soft-fail)."`
+	MaxScan          int      `help:"Override the maximum number of leading bytes to read (0 = library default)."`
 }
 
 // Run executes the verify command. It exits non-zero when the manifest is invalid.
@@ -89,6 +91,7 @@ func (c *VerifyCmd) Run() error {
 	opts := analyze.VerifyOptions{
 		OnlineRevocation: c.OnlineRevocation,
 		MaxScan:          c.MaxScan,
+		IdentityIssuers:  c.IdentityIssuer,
 	}
 	var err error
 	if c.SigningTrust != "" {
@@ -99,6 +102,11 @@ func (c *VerifyCmd) Run() error {
 	if c.TimestampTrust != "" {
 		if opts.TimestampTrustPEM, err = os.ReadFile(c.TimestampTrust); err != nil {
 			return fmt.Errorf("read timestamp trust: %w", err)
+		}
+	}
+	if c.IdentityTrust != "" {
+		if opts.IdentityTrustPEM, err = os.ReadFile(c.IdentityTrust); err != nil {
+			return fmt.Errorf("read identity trust: %w", err)
 		}
 	}
 
@@ -133,6 +141,8 @@ var errInvalid = errors.New("manifest is not valid")
 type SignerFlags struct {
 	SigningKey         string `name:"signing-key" env:"C2PA_SIGNING_KEY" help:"PEM file holding the unencrypted private key (PKCS#8, EC or RSA)." type:"existingfile"`
 	SigningCert        string `name:"signing-cert" env:"C2PA_SIGNING_CERT" help:"PEM file holding the certificate chain, leaf first (the key file, if it also holds the certificates)." type:"existingfile"`
+	IdentityKey        string `name:"identity-key" env:"C2PA_IDENTITY_KEY" help:"PEM file holding the NAMED ACTOR's private key. With --identity-cert, every manifest also carries a cawg.identity assertion saying who vouches for the content. May be the signing key." type:"existingfile"`
+	IdentityCert       string `name:"identity-cert" env:"C2PA_IDENTITY_CERT" help:"PEM file holding the named actor's certificate chain, leaf first." type:"existingfile"`
 	TimestampAuthority string `name:"tsa" env:"C2PA_TSA_URL" help:"RFC 3161 timestamp authority URL; every signature is timestamped when set."`
 	ClaimGenerator     string `name:"claim-generator" default:"c2pa-mcp" help:"Producer name recorded in the manifest's claim_generator_info."`
 }
@@ -153,13 +163,25 @@ func (f SignerFlags) load() (*analyze.Signer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read signing certificate: %w", err)
 	}
-	return analyze.LoadSigner(analyze.SignerConfig{
+	cfg := analyze.SignerConfig{
 		KeyPEM:                keyPEM,
 		CertPEM:               certPEM,
 		ClaimGenerator:        f.ClaimGenerator,
 		ClaimGeneratorVersion: version,
 		TimestampAuthority:    f.TimestampAuthority,
-	})
+	}
+	if f.IdentityKey != "" || f.IdentityCert != "" {
+		if f.IdentityKey == "" || f.IdentityCert == "" {
+			return nil, errors.New("both --identity-key and --identity-cert are required to sign as a named actor")
+		}
+		if cfg.IdentityKeyPEM, err = os.ReadFile(f.IdentityKey); err != nil {
+			return nil, fmt.Errorf("read identity key: %w", err)
+		}
+		if cfg.IdentityCertPEM, err = os.ReadFile(f.IdentityCert); err != nil {
+			return nil, fmt.Errorf("read identity certificate: %w", err)
+		}
+	}
+	return analyze.LoadSigner(cfg)
 }
 
 // SignCmd implements `c2pa-mcp sign`.
@@ -170,6 +192,8 @@ type SignCmd struct {
 	Title             string      `help:"dc:title recorded in the manifest."`
 	Action            string      `enum:"auto,created,opened" default:"auto" help:"First action: created (nothing preceded this asset), opened (something did), or auto — opened when the asset already carries a manifest, created otherwise."`
 	DigitalSourceType string      `name:"digital-source-type" help:"IPTC digital source type of a created asset: a full URL or a bare term such as digitalCapture, trainedAlgorithmicMedia or compositeWithTrainedAlgorithmicMedia; 'empty' is C2PA's own."`
+	IdentityRole      []string    `name:"identity-role" help:"Role the named actor declares, repeatable: cawg.creator, cawg.editor, cawg.producer, … or an entity label such as com.example.reviewer. Needs --identity-key and --identity-cert."`
+	IdentityReference []string    `name:"identity-reference" help:"Assertion label the named actor also signs over, repeatable (e.g. c2pa.actions.v2). The content itself is always signed over."`
 	SoftBinding       string      `name:"soft-binding" enum:"none,iscc" default:"none" help:"Also write a soft binding, a perceptual identifier that survives re-encoding: 'iscc' computes an ISO 24138 Image-Code (io.iscc.v0) over a JPEG, PNG, GIF, WebP or TIFF. The hard binding is still written; verifiers report a soft binding without checking it."`
 	Force             bool        `help:"Overwrite an existing output file."`
 	JSON              bool        `help:"Emit JSON instead of a human-readable summary."`
@@ -189,7 +213,14 @@ func (c *SignCmd) Run() error {
 	}
 	defer func() { _ = closer() }()
 
-	req := analyze.SignRequest{Title: c.Title, Action: c.Action, DigitalSourceType: c.DigitalSourceType, SoftBinding: c.SoftBinding}
+	req := analyze.SignRequest{
+		Title:              c.Title,
+		Action:             c.Action,
+		DigitalSourceType:  c.DigitalSourceType,
+		SoftBinding:        c.SoftBinding,
+		IdentityRoles:      c.IdentityRole,
+		IdentityReferences: c.IdentityReference,
+	}
 	if c.Output == "-" {
 		res, err := signer.Sign(ctx, container, r, os.Stdout, req)
 		if err != nil {

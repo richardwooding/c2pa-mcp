@@ -67,7 +67,17 @@ func New(version string, opts ...Option) *mcp.Server {
 			"any perceptual identifiers the manifest carries (a watermark or a fingerprint, such as " +
 			"an ISCC) — REPORTED, never checked: matching one means recomputing it and comparing " +
 			"within a tolerance, which is a policy decision, so nothing here says the content " +
-			"matches. Do not report a soft binding as evidence of anything.",
+			"matches. Do not report a soft binding as evidence of anything. `identities` lists any " +
+			"CAWG identity assertions — named actors who signed over the content with their own " +
+			"credential. Read each entry's `name` for who was PROVEN (empty unless `trusted`) and " +
+			"`presented_as` for who was merely claimed — the same split as `verified_signer` and " +
+			"`signers`. An identity means the actor VOUCHED for those assertions: it conveys neither " +
+			"attribution nor ownership, so never say an asset was created by them. For an aggregation " +
+			"credential, `verified_identities` is the AGGREGATOR'S word about signals it checked, " +
+			"proven only as far as that aggregator is trusted. Neither trust list has a default, so " +
+			"unproven is the normal, honest outcome rather than a warning; a " +
+			"cawg.ica.did_unsupported_method failure means this build cannot resolve that " +
+			"aggregator's DID method, which is a limit here and not a defect in the file.",
 	}, h.verify)
 
 	if h.signer != nil {
@@ -90,7 +100,11 @@ func New(version string, opts ...Option) *mcp.Server {
 				"copy can be matched back to this manifest through a provenance store. Still images this " +
 				"build can decode only — JPEG, PNG, GIF, WebP and TIFF — and the hard binding is still " +
 				"written, since a soft binding is never an asset's only content binding. Anyone who can call this tool signs with the " +
-				"operator's key.",
+				"content binding. When the server was started with an identity credential, `identity_roles` " +
+				"and `identity_references` also write a cawg.identity assertion: a second signature by a " +
+				"NAMED ACTOR saying who vouches for the content. That actor's key, like the signing key, " +
+				"is the operator's and is never a tool argument. Anyone who can call this tool signs " +
+				"with the operator's key.",
 		}, h.sign)
 	}
 

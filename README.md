@@ -21,9 +21,9 @@ Three operations, mirroring the library's three modes:
   claimed signer and signing time). Fast and **UNVERIFIED**, like reading EXIF. No crypto.
 - **verify** — fully validate the manifest: COSE signature, certificate chain against the trust
   list, assertion and hard-binding hashes, and the RFC 3161 timestamp. Returns an overall
-  `valid` flag plus per-step C2PA status codes.
+  `valid` flag plus per-step C2PA status codes, and lists [who vouched for it](#who-vouched-for-it).
 - **sign** — embed a signed manifest with your own key and certificate chain, into any of the
-  supported formats. An asset that already carries Content Credentials keeps them, chained as
+  supported formats. Optionally also signs as a [named actor](#who-vouched-for-it). An asset that already carries Content Credentials keeps them, chained as
   the new manifest's parent. Nothing is written unless the output validates. Optionally also
   writes a [soft binding](#soft-bindings) — an identifier computed from the content, which
   survives the re-encoding that breaks a hash.
@@ -104,6 +104,14 @@ c2pa-mcp sign photo.jpg out.jpg --signing-key signer.key --signing-cert signer.c
 # pixels, so a re-encoded copy can still be matched back to this manifest
 c2pa-mcp sign photo.jpg out.jpg --signing-key signer.key --signing-cert signer.crt \
   --soft-binding iscc
+
+# Sign as a named actor too: a second signature, with the actor's own
+# credential, saying WHO vouches for the content
+c2pa-mcp sign photo.jpg out.jpg --signing-key signer.key --signing-cert signer.crt \
+  --identity-key alice.key --identity-cert alice.crt --identity-role cawg.creator
+
+# Prove a named actor on verify by naming the CAs you believe
+c2pa-mcp verify photo.jpg --identity-trust actor-cas.pem
 ```
 
 `--signing-key`, `--signing-cert` and `--tsa` also read `C2PA_SIGNING_KEY`, `C2PA_SIGNING_CERT`
@@ -153,8 +161,8 @@ Every tool accepts exactly one of `path`, `url`, or `bytes` (base64):
 | Tool     | Arguments | Returns |
 |----------|-----------|---------|
 | `detect` | `path` \| `url` \| `bytes` | text summary + structured `DetectResult` |
-| `verify` | `path` \| `url` \| `bytes`, plus optional `online_revocation` (bool), `max_scan` (int) | text summary + structured `VerifyResult` |
-| `sign`   | `path` \| `url` \| `bytes`, `output` (path; required unless the input is `bytes`), optional `overwrite` (bool), `title`, `action` (`created` \| `opened`), `digital_source_type`, `soft_binding` (`iscc`) | text summary + structured `SignResult` (with `signed_bytes` when no `output`) |
+| `verify` | `path` \| `url` \| `bytes`, plus optional `online_revocation` (bool), `max_scan` (int), `identity_issuers` (DIDs) | text summary + structured `VerifyResult` |
+| `sign`   | `path` \| `url` \| `bytes`, `output` (path; required unless the input is `bytes`), optional `overwrite` (bool), `title`, `action` (`created` \| `opened`), `digital_source_type`, `soft_binding` (`iscc`), `identity_roles`, `identity_references` | text summary + structured `SignResult` (with `signed_bytes` when no `output`) |
 
 `sign` exists only when the server was started with `--signing-key` and `--signing-cert`; the key
 is the **operator's**, configured at startup, never a tool argument. Anyone who can reach the
@@ -192,8 +200,8 @@ object-level manifest, spec §A.4.3), `unknown` when nothing places it at all. F
 it as the file's signer.
 
 `verify` adds `valid`, `active_manifest_label`, a verified `signed_at`, the `signers` chain
-(subject CNs, leaf first), `binding`, any `soft_bindings` (see [below](#soft-bindings)), and an
-ordered `statuses` list of `{code, severity, uri, explanation}` entries using the C2PA §15 status
+(subject CNs, leaf first), `binding`, any `soft_bindings` (see [below](#soft-bindings)), any
+`identities` (see [below](#who-vouched-for-it)), and an ordered `statuses` list of `{code, severity, uri, explanation}` entries using the C2PA §15 status
 codes.
 
 `binding` answers a different question from `valid`: were **these bytes** the ones that were signed?
@@ -233,6 +241,82 @@ was asked for; `verify` is the library's verdict on the
 manifest — the library refuses to write anything that fails this check, so `valid` is
 confirmation. Run `verify` on the file for the full picture, including how a prior manifest fares
 against the trust list.
+
+## Who vouched for it
+
+A C2PA claim says which *tool* wrote a manifest. A **CAWG identity assertion** says which *person or
+organisation* stands behind it: a named actor's own signature, with their own credential, over some
+of the manifest's assertions — always the hard binding, so the actor vouches for the content bytes
+too, not merely for some metadata.
+
+```sh
+c2pa-mcp verify photo.jpg
+#   Vouched for by: Alice Example (presented, unproven) vouches for c2pa.hash.data,
+#     c2pa.actions.v2 as cawg.creator - signature genuine, actor NOT proven
+```
+
+**Unproven is the normal outcome, not a warning.** CAWG publishes no list of certificate authorities
+that vouch for people, and this tool ships none, so by default a genuine identity reads exactly as
+above: the signature is real, the actor is not proven. Name the CAs you believe and it changes:
+
+```sh
+c2pa-mcp verify photo.jpg --identity-trust actor-cas.pem
+#   Vouched for by: Alice Example (PROVEN) vouches for … as cawg.creator
+```
+
+Read `name` for who was **proven** — it is empty unless `trusted`, exactly as `verified_signer` is —
+and `presented_as` for who was merely claimed.
+
+### What it does not mean
+
+An identity assertion says the actor **vouched for** those assertions. The spec is explicit that it
+"SHOULD NOT be construed to convey either attribution or ownership of a C2PA asset", so nothing here
+says an asset was *created by* anyone, and neither should anything you build on it.
+
+The second kind of credential makes that sharper. An **identity claims aggregation** credential is a
+verifiable credential in which an aggregator lists identity signals it checked — a social account, a
+document verification, an affiliation:
+
+```json
+"identities": [{
+  "sig_type": "cawg.identity_claims_aggregation",
+  "issuer": "did:jwk:eyJrdHkiOi…",
+  "valid": true, "trusted": false,
+  "verified_identities": [
+    {"type": "cawg.social_media", "name": "Alice Example", "username": "alice",
+     "provider_name": "Social Example", "verified_at": "2026-05-03T12:00:00Z"}
+  ]
+}]
+```
+
+All of that is the **aggregator's word**: it attests that the actor presented those signals to it and
+presented this asset to it. It is proven exactly as far as you trust the aggregator, which you say
+with `--identity-issuer <did>` (repeatable). Name none and issuer trust is simply not evaluated —
+naming one makes a credential from any *other* aggregator a failure, as the spec asks.
+
+Two limits worth knowing. Only `did:jwk` issuers are resolved; a `did:web` issuer — which some
+aggregators use — reports `cawg.ica.did_unsupported_method`, and that is a limit of this build
+rather than a defect in the file. And identities belonging to *ingredient* manifests are validated
+but not listed: `identities` describes the active manifest.
+
+### Signing as a named actor
+
+Give `sign` (or `serve`) an actor's credential and every manifest carries their assertion too:
+
+```sh
+c2pa-mcp sign photo.jpg out.jpg \
+  --signing-key signer.key --signing-cert signer.crt \
+  --identity-key alice.key --identity-cert alice.crt \
+  --identity-role cawg.creator --identity-reference c2pa.actions.v2
+```
+
+`--identity-role` and `--identity-reference` are repeatable. Roles are CAWG labels — `cawg.creator`,
+`cawg.editor`, `cawg.producer`, `cawg.publisher`, … or your own `com.example.reviewer`. References
+name further assertions the actor signs over; the content itself always is, so it must not be
+listed. The identity key may be the signing key.
+
+On the MCP server the actor's key is the **operator's**, configured at startup exactly like the
+signing key, and never a tool argument — only `identity_roles` and `identity_references` are.
 
 ## Soft bindings
 
