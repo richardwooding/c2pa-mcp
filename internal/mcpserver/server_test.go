@@ -364,3 +364,88 @@ func TestSignTool_CreatedOnSignedRefused(t *testing.T) {
 		t.Fatal("created on an already-signed asset should be a tool error")
 	}
 }
+
+// identityTestSigner is testSigner plus a named actor's own credential, so the
+// server writes a cawg.identity assertion alongside the claim.
+func identityTestSigner(t *testing.T) *analyze.Signer {
+	t.Helper()
+	claim, err := testpki.SelfSigned("MCP Test Signer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, err := testpki.SelfSigned("Corpus Cat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := analyze.LoadSigner(analyze.SignerConfig{
+		KeyPEM: claim.KeyPEM(), CertPEM: claim.CertPEM(),
+		IdentityKeyPEM: actor.KeyPEM(), IdentityCertPEM: actor.CertPEM(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// TestSignTool_Identity drives a named actor through the MCP surface and reads
+// it back with the verify tool — the two halves an agent uses.
+//
+// The actor's key is the operator's, configured at startup; only the roles are
+// a tool argument. That split is the point, and this test would fail loudly if
+// a key ever became an argument.
+func TestSignTool_Identity(t *testing.T) {
+	session := connect(t, WithSigner(identityTestSigner(t)))
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "sign",
+		Arguments: map[string]any{"bytes": fixtureBase64(t), "identity_roles": []string{"cawg.creator"}},
+	})
+	if err != nil {
+		t.Fatalf("call sign: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("sign reported tool error: %s", firstText(t, res))
+	}
+	if text := firstText(t, res); !strings.Contains(text, "Vouched for by: Corpus Cat") {
+		t.Fatalf("summary should name the actor: %q", text)
+	}
+	var got analyze.SignResult
+	structuredInto(t, res, &got)
+	if got.Identity == nil || got.Identity.Name != "Corpus Cat" {
+		t.Fatalf("identity = %+v", got.Identity)
+	}
+
+	ver, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "verify",
+		Arguments: map[string]any{"bytes": got.SignedBytes},
+	})
+	if err != nil || ver.IsError {
+		t.Fatalf("verify on signed output: %v %v", err, ver)
+	}
+	var v analyze.VerifyResult
+	structuredInto(t, ver, &v)
+	if len(v.Identities) != 1 {
+		t.Fatalf("verify reported %d identities, want 1", len(v.Identities))
+	}
+	id := v.Identities[0]
+	// Genuine signature, actor unproven: no identity anchors were configured,
+	// which is the honest default rather than a warning.
+	if id.PresentedAs != "Corpus Cat" || id.Name != "" || !id.Valid || id.Trusted {
+		t.Fatalf("identity = %+v", id)
+	}
+}
+
+// TestSignTool_IdentityRefused: roles asked of a server with no identity
+// credential are an error, not a quiet sign without one.
+func TestSignTool_IdentityRefused(t *testing.T) {
+	session := connect(t, WithSigner(testSigner(t)))
+	res, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "sign",
+		Arguments: map[string]any{"bytes": fixtureBase64(t), "identity_roles": []string{"cawg.creator"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.IsError || !strings.Contains(firstText(t, res), "identity roles and references need") {
+		t.Fatalf("expected a refusal naming the flags, got %v %q", res.IsError, firstText(t, res))
+	}
+}

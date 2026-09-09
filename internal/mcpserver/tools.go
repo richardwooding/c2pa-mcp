@@ -23,11 +23,12 @@ type DetectArgs struct {
 // VerifyArgs are the inputs to the verify tool. Exactly one of Path, URL, or
 // Bytes must be set.
 type VerifyArgs struct {
-	Path             string `json:"path,omitempty" jsonschema:"Local filesystem path to a JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF file"`
-	URL              string `json:"url,omitempty" jsonschema:"HTTP(S) URL of a JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF file to fetch and analyze"`
-	Bytes            string `json:"bytes,omitempty" jsonschema:"Base64-encoded (standard encoding) JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF bytes"`
-	OnlineRevocation bool   `json:"online_revocation,omitempty" jsonschema:"Enable OCSP/CRL revocation checks over the network (soft-fail)"`
-	MaxScan          int    `json:"max_scan,omitempty" jsonschema:"Override the maximum number of leading bytes to read (0 = library default of 256 MiB)"`
+	Path             string   `json:"path,omitempty" jsonschema:"Local filesystem path to a JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF file"`
+	URL              string   `json:"url,omitempty" jsonschema:"HTTP(S) URL of a JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF file to fetch and analyze"`
+	Bytes            string   `json:"bytes,omitempty" jsonschema:"Base64-encoded (standard encoding) JPEG, PNG, WebP, GIF, TIFF, HEIC, AVIF, SVG, MP4, MOV, AVI, WAV, MP3 or PDF bytes"`
+	IdentityIssuers  []string `json:"identity_issuers,omitempty" jsonschema:"DIDs of identity claims aggregators to believe. Naming any makes a credential from an aggregator NOT named a failure; naming none (the default) leaves issuer trust unevaluated, so a genuine credential reads well-formed with its actor unproven"`
+	OnlineRevocation bool     `json:"online_revocation,omitempty" jsonschema:"Enable OCSP/CRL revocation checks over the network (soft-fail)"`
+	MaxScan          int      `json:"max_scan,omitempty" jsonschema:"Override the maximum number of leading bytes to read (0 = library default of 256 MiB)"`
 }
 
 func (h *handlers) detect(ctx context.Context, _ *mcp.CallToolRequest, args DetectArgs) (*mcp.CallToolResult, analyze.DetectResult, error) {
@@ -53,6 +54,7 @@ func (h *handlers) verify(ctx context.Context, _ *mcp.CallToolRequest, args Veri
 	res, err := analyze.Verify(ctx, container, r, analyze.VerifyOptions{
 		OnlineRevocation: args.OnlineRevocation,
 		MaxScan:          args.MaxScan,
+		IdentityIssuers:  args.IdentityIssuers,
 	})
 	if err != nil {
 		return nil, analyze.VerifyResult{}, err
@@ -66,15 +68,17 @@ func (h *handlers) verify(ctx context.Context, _ *mcp.CallToolRequest, args Veri
 // SignArgs are the inputs to the sign tool. Exactly one of Path, URL, or Bytes
 // must be set; Output is required unless the asset arrived as Bytes.
 type SignArgs struct {
-	Path              string `json:"path,omitempty" jsonschema:"Local filesystem path of the asset to sign"`
-	URL               string `json:"url,omitempty" jsonschema:"HTTP(S) URL of the asset to fetch and sign"`
-	Bytes             string `json:"bytes,omitempty" jsonschema:"Base64-encoded (standard encoding) asset bytes to sign"`
-	Output            string `json:"output,omitempty" jsonschema:"Local filesystem path to write the signed asset to. Required for path and url inputs. When omitted for a bytes input, the signed asset is returned base64-encoded as signed_bytes"`
-	Overwrite         bool   `json:"overwrite,omitempty" jsonschema:"Replace an existing output file (default: refuse)"`
-	Title             string `json:"title,omitempty" jsonschema:"dc:title recorded in the manifest"`
-	Action            string `json:"action,omitempty" jsonschema:"First action: created (nothing preceded this asset) or opened (something did). Default: opened when the asset already carries a manifest, created otherwise"`
-	DigitalSourceType string `json:"digital_source_type,omitempty" jsonschema:"IPTC digital source type of a created asset: a full URL or a bare term such as digitalCapture, trainedAlgorithmicMedia or compositeWithTrainedAlgorithmicMedia; 'empty' is C2PA's own"`
-	SoftBinding       string `json:"soft_binding,omitempty" jsonschema:"Also write a soft binding, a perceptual identifier that survives re-encoding and lets a stripped copy be matched back to this manifest: 'iscc' computes an ISO 24138 Image-Code (io.iscc.v0) over a JPEG, PNG, GIF, WebP or TIFF. Omit or 'none' for no soft binding. The hard binding is always written too"`
+	Path               string   `json:"path,omitempty" jsonschema:"Local filesystem path of the asset to sign"`
+	URL                string   `json:"url,omitempty" jsonschema:"HTTP(S) URL of the asset to fetch and sign"`
+	Bytes              string   `json:"bytes,omitempty" jsonschema:"Base64-encoded (standard encoding) asset bytes to sign"`
+	Output             string   `json:"output,omitempty" jsonschema:"Local filesystem path to write the signed asset to. Required for path and url inputs. When omitted for a bytes input, the signed asset is returned base64-encoded as signed_bytes"`
+	Overwrite          bool     `json:"overwrite,omitempty" jsonschema:"Replace an existing output file (default: refuse)"`
+	Title              string   `json:"title,omitempty" jsonschema:"dc:title recorded in the manifest"`
+	Action             string   `json:"action,omitempty" jsonschema:"First action: created (nothing preceded this asset) or opened (something did). Default: opened when the asset already carries a manifest, created otherwise"`
+	DigitalSourceType  string   `json:"digital_source_type,omitempty" jsonschema:"IPTC digital source type of a created asset: a full URL or a bare term such as digitalCapture, trainedAlgorithmicMedia or compositeWithTrainedAlgorithmicMedia; 'empty' is C2PA's own"`
+	IdentityRoles      []string `json:"identity_roles,omitempty" jsonschema:"Roles the named actor declares (cawg.creator, cawg.editor, …), when this server was started with an identity credential. A declaration by the actor, not proof of anything"`
+	IdentityReferences []string `json:"identity_references,omitempty" jsonschema:"Extra assertion labels the named actor signs over (e.g. c2pa.actions.v2). The content itself is always signed over and must not be listed"`
+	SoftBinding        string   `json:"soft_binding,omitempty" jsonschema:"Also write a soft binding, a perceptual identifier that survives re-encoding and lets a stripped copy be matched back to this manifest: 'iscc' computes an ISO 24138 Image-Code (io.iscc.v0) over a JPEG, PNG, GIF, WebP or TIFF. Omit or 'none' for no soft binding. The hard binding is always written too"`
 }
 
 // errOutputRequired is the sign tool's refusal to guess where a file should go.
@@ -90,7 +94,14 @@ func (h *handlers) sign(ctx context.Context, _ *mcp.CallToolRequest, args SignAr
 	}
 	defer func() { _ = closer() }()
 
-	req := analyze.SignRequest{Title: args.Title, Action: args.Action, DigitalSourceType: args.DigitalSourceType, SoftBinding: args.SoftBinding}
+	req := analyze.SignRequest{
+		Title:              args.Title,
+		Action:             args.Action,
+		DigitalSourceType:  args.DigitalSourceType,
+		SoftBinding:        args.SoftBinding,
+		IdentityRoles:      args.IdentityRoles,
+		IdentityReferences: args.IdentityReferences,
+	}
 	var res analyze.SignResult
 	if args.Output != "" {
 		res, err = h.signer.SignToFile(ctx, container, r, args.Output, args.Overwrite, req)

@@ -68,8 +68,16 @@ type VerifyResult struct {
 	// back to this manifest. They are REPORTED, never checked — see
 	// SoftBindingReport — so they say nothing about Valid or Binding.
 	SoftBindings []SoftBindingReport `json:"soft_bindings,omitempty"`
-	Detect       DetectResult        `json:"detect"` // the unverified claims, for convenience
-	Statuses     []StatusInfo        `json:"statuses"`
+	// Identities are the active manifest's CAWG identity assertions: named
+	// actors who signed over the content with their own credentials. Read
+	// each entry's Name for who was PROVEN and PresentedAs for who was merely
+	// claimed — the same split as VerifiedSigner and Signers above. An identity
+	// says the actor VOUCHED for these assertions; it conveys neither
+	// attribution nor ownership. Identities of ingredient manifests are
+	// validated but not listed here.
+	Identities []IdentityReport `json:"identities,omitempty"`
+	Detect     DetectResult     `json:"detect"` // the unverified claims, for convenience
+	Statuses   []StatusInfo     `json:"statuses"`
 }
 
 // VerifyOptions is the common subset of c2pa.ValidateOption controls exposed by
@@ -80,6 +88,15 @@ type VerifyOptions struct {
 	SigningTrustPEM []byte
 	// TimestampTrustPEM, when non-empty, overrides the embedded TSA trust pool.
 	TimestampTrustPEM []byte
+	// IdentityTrustPEM, when non-empty, anchors CAWG X.509 identity credentials
+	// — the certificate authorities whose credentials PROVE a named actor.
+	// There is no default: CAWG publishes no list, so without this every
+	// identity is well-formed and its actor unproven.
+	IdentityTrustPEM []byte
+	// IdentityIssuers are the identity claims aggregators to believe, by DID.
+	// Empty means issuer trust is not evaluated, which is the honest default;
+	// naming any means a credential from an aggregator NOT named is a failure.
+	IdentityIssuers []string
 	// OnlineRevocation enables OCSP/CRL revocation checks (network, soft-fail).
 	OnlineRevocation bool
 	// MaxScan overrides how many leading bytes the validator reads (0 = default).
@@ -111,6 +128,7 @@ func verifyWith(ctx context.Context, container c2pa.Container, r io.Reader, cfg 
 		ActiveManifestLabel: res.ActiveManifestLabel,
 		Binding:             res.Binding.String(),
 		SoftBindings:        toSoftBindingReports(res.SoftBindings),
+		Identities:          toIdentityReports(res.Identities),
 		Detect:              toDetectResult(res.Info),
 	}
 	if !res.SignedAt.IsZero() {
@@ -155,6 +173,20 @@ func (o VerifyOptions) toValidateOptions() ([]c2pa.ValidateOption, error) {
 			return nil, err
 		}
 		opts = append(opts, c2pa.WithTimestampTrust(pool))
+	}
+	if len(o.IdentityTrustPEM) > 0 {
+		pool, err := poolFromPEM(o.IdentityTrustPEM, "identity trust")
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, c2pa.WithIdentityTrust(pool))
+	}
+	// Only when the caller actually named an aggregator. c2pa.WithIdentityIssuers()
+	// with no DIDs means "trust NO aggregator" and fails every aggregation
+	// credential — so the guard belongs here, at the call site, and never on
+	// the arguments.
+	if len(o.IdentityIssuers) > 0 {
+		opts = append(opts, c2pa.WithIdentityIssuers(o.IdentityIssuers...))
 	}
 	if o.OnlineRevocation {
 		opts = append(opts, c2pa.WithOnlineRevocation(true))
@@ -259,17 +291,27 @@ func (v VerifyResult) Summary() string {
 	for _, sb := range v.SoftBindings {
 		writeField(&b, "Soft binding", sb.summarize())
 	}
-	if len(v.Statuses) > 0 {
-		b.WriteString("Statuses:\n")
-		for _, s := range v.Statuses {
-			line := fmt.Sprintf("  [%s] %s", s.Severity, s.Code)
-			if s.Explanation != "" {
-				line += " - " + s.Explanation
-			}
-			b.WriteString(line + "\n")
-		}
+	for _, id := range v.Identities {
+		writeField(&b, "Vouched for by", id.summarize())
 	}
+	writeStatuses(&b, v.Statuses)
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// writeStatuses appends the per-step status list, which is the bulk of a
+// verify summary and the part that says WHY a verdict came out as it did.
+func writeStatuses(b *strings.Builder, statuses []StatusInfo) {
+	if len(statuses) == 0 {
+		return
+	}
+	b.WriteString("Statuses:\n")
+	for _, s := range statuses {
+		line := fmt.Sprintf("  [%s] %s", s.Severity, s.Code)
+		if s.Explanation != "" {
+			line += " - " + s.Explanation
+		}
+		b.WriteString(line + "\n")
+	}
 }
 
 // bindingSummary spells out a binding state, because "unevaluated" is the one a

@@ -53,6 +53,13 @@ type SignerConfig struct {
 	// the manifest (claim_generator_info). Empty → DefaultClaimGenerator.
 	ClaimGenerator        string
 	ClaimGeneratorVersion string
+	// IdentityKeyPEM and IdentityCertPEM are the NAMED ACTOR's own credential,
+	// in the same PEM forms as the pair above. Given both, every manifest also
+	// carries a cawg.identity assertion: a second signature, made with this
+	// credential, saying WHO vouches for the content where the claim says which
+	// tool wrote it. They may be the same key and chain as the claim's.
+	IdentityKeyPEM  []byte
+	IdentityCertPEM []byte
 	// TimestampAuthority, when set, is an RFC 3161 TSA URL: every signature is
 	// timestamped after signing and the token embedded. Empty → no network.
 	TimestampAuthority string
@@ -66,6 +73,13 @@ type Signer struct {
 	pool   *x509.CertPool // anchored at the chain's top certificate
 	name   string         // the leaf's subject, for reports
 	tsa    string
+
+	// identityName is the named actor's presented subject, empty when no
+	// identity credential was configured. identityPool anchors that actor's own
+	// chain so the self-check can require the identity to read back — the same
+	// trick pool plays for the claim signer.
+	identityName string
+	identityPool *x509.CertPool
 }
 
 // LoadSigner parses the PEM material and builds the library signer, which
@@ -91,14 +105,50 @@ func LoadSigner(cfg SignerConfig) (*Signer, error) {
 			opts = append(opts, c2pa.WithTimestampHTTPClient(cfg.HTTPClient))
 		}
 	}
+	out := &Signer{pool: x509.NewCertPool(), name: certName(chain[0]), tsa: cfg.TimestampAuthority}
+	out.pool.AddCert(chain[len(chain)-1])
+
+	if len(cfg.IdentityKeyPEM) > 0 || len(cfg.IdentityCertPEM) > 0 {
+		idKey, idChain, err := loadIdentityCredential(cfg)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, c2pa.WithIdentitySigner(idKey, idChain))
+		out.identityName = certName(idChain[0])
+		out.identityPool = x509.NewCertPool()
+		out.identityPool.AddCert(idChain[len(idChain)-1])
+	}
+
 	s, err := c2pa.NewSigner(key, chain, opts...)
 	if err != nil {
 		return nil, err
 	}
-	pool := x509.NewCertPool()
-	pool.AddCert(chain[len(chain)-1])
-	return &Signer{signer: s, pool: pool, name: certName(chain[0]), tsa: cfg.TimestampAuthority}, nil
+	out.signer = s
+	return out, nil
 }
+
+// loadIdentityCredential parses the named actor's key and chain. Both are
+// required together: a key with no certificate names nobody, and a certificate
+// with no key cannot sign.
+func loadIdentityCredential(cfg SignerConfig) (crypto.Signer, []*x509.Certificate, error) {
+	if len(cfg.IdentityKeyPEM) == 0 || len(cfg.IdentityCertPEM) == 0 {
+		return nil, nil, errors.New("both an identity key and an identity certificate are required to sign as a named actor")
+	}
+	key, err := parsePrivateKey(cfg.IdentityKeyPEM)
+	if err != nil {
+		return nil, nil, fmt.Errorf("identity %w", err)
+	}
+	chain, err := parseCertChain(cfg.IdentityCertPEM)
+	if err != nil {
+		return nil, nil, fmt.Errorf("identity %w", err)
+	}
+	return key, chain, nil
+}
+
+// IdentityName is the named actor's presented subject, or "" when the Signer
+// writes no identity assertion. Presented, not proven: what a verifier makes of
+// it depends on the trust anchors THEY configure.
+func (s *Signer) IdentityName() string { return s.identityName }
 
 // Name is the signing certificate's subject, as a verifier would report it.
 func (s *Signer) Name() string { return s.name }
@@ -181,6 +231,15 @@ type SignRequest struct {
 	// or compositeWithTrainedAlgorithmicMedia, which is completed to the IPTC
 	// NewsCodes URL; "empty" is C2PA's own http://c2pa.org/digitalsourcetype/empty.
 	DigitalSourceType string
+	// IdentityRoles are the named actor's roles in producing the asset —
+	// c2pa.RoleCreator ("cawg.creator"), RoleEditor, … or an entity-namespaced
+	// label such as "com.example.reviewer". IdentityReferences names further
+	// assertions of this manifest the actor signs over, by label; the hard
+	// binding is always signed over and must not be listed. Both need an
+	// identity credential on the Signer (ErrIdentityCredential otherwise), and
+	// both are declarations by the actor, not proof of anything.
+	IdentityRoles      []string
+	IdentityReferences []string
 	// SoftBinding names a soft binding to compute and write ALONGSIDE the hard
 	// binding, which every signed asset still gets: SoftBindingISCC ("iscc",
 	// an ISO 24138 Image-Code over a JPEG, PNG, GIF, WebP or TIFF) or
@@ -206,6 +265,12 @@ type SignResult struct {
 	// SignedBytes is the signed asset, base64, when the caller asked for it
 	// inline instead of a file.
 	SignedBytes string `json:"signed_bytes,omitempty"`
+	// Identity describes the cawg.identity assertion written, when the Signer
+	// had an identity credential. Name is the actor's PRESENTED subject: what a
+	// verifier makes of it depends on the anchors they configure, so this is
+	// not a claim that the actor was proven. Verify.Identities below is what a
+	// verifier actually reads back out of the output.
+	Identity *SignedIdentity `json:"identity,omitempty"`
 	// SoftBinding is the canonical identifier of the soft binding written, when
 	// one was asked for — the "ISCC:…" string for SoftBindingISCC. The
 	// assertion itself carries that code's raw digest, and Verify.SoftBindings
@@ -217,6 +282,19 @@ type SignResult struct {
 	// check, so Valid is confirmation). Run verify on the file for the full
 	// picture, including how a prior manifest fares against the trust list.
 	Verify VerifyResult `json:"verify"`
+}
+
+// SignedIdentity is the named actor an output's cawg.identity assertion
+// declares. It records what was WRITTEN; whether a reader will believe it is a
+// separate question, answered by their trust anchors.
+type SignedIdentity struct {
+	// Name is the actor's certificate subject, as presented.
+	Name string `json:"name,omitempty"`
+	// Roles are the roles declared for the actor, verbatim.
+	Roles []string `json:"roles,omitempty"`
+	// Referenced are the extra assertion labels the actor signed over. The hard
+	// binding is always signed over and is not listed here.
+	Referenced []string `json:"referenced,omitempty"`
 }
 
 const iptcDigitalSourceTypePrefix = "http://cv.iptc.org/newscodes/digitalsourcetype/"
@@ -275,6 +353,10 @@ func (s *Signer) Sign(ctx context.Context, container c2pa.Container, r io.Reader
 	if err != nil {
 		return SignResult{}, err
 	}
+	identity, err := identityInfoFor(req.IdentityRoles, req.IdentityReferences, s.identityName != "")
+	if err != nil {
+		return SignResult{}, err
+	}
 
 	m := c2pa.Manifest{
 		Title: req.Title,
@@ -286,6 +368,7 @@ func (s *Signer) Sign(ctx context.Context, container c2pa.Container, r io.Reader
 	if softBinding != nil {
 		m.SoftBindings = []c2pa.SoftBindingInfo{*softBinding}
 	}
+	m.Identity = identity
 	var signed bytes.Buffer
 	if err := s.signer.Sign(ctx, container, bytes.NewReader(data), &signed, m); err != nil {
 		return SignResult{}, err
@@ -297,6 +380,7 @@ func (s *Signer) Sign(ctx context.Context, container c2pa.Container, r io.Reader
 		ChainedPriorManifest: present && action == c2pa.ActionOpened,
 		Timestamped:          s.tsa != "",
 		SoftBinding:          softBindingCode,
+		Identity:             s.signedIdentity(identity),
 		Size:                 signed.Len(),
 		Verify: verifyWith(ctx, container, bytes.NewReader(signed.Bytes()),
 			c2pa.WithSigningTrust(s.pool), c2pa.WithMaxIngredientDepth(0), c2pa.WithOnlineRevocation(false)),
@@ -355,6 +439,15 @@ func (s *Signer) SignToFile(ctx context.Context, container c2pa.Container, r io.
 	return res, nil
 }
 
+// signedIdentity describes the identity assertion this Signer wrote, or nil
+// when it has no identity credential and therefore wrote none.
+func (s *Signer) signedIdentity(info c2pa.IdentityInfo) *SignedIdentity {
+	if s.identityName == "" {
+		return nil
+	}
+	return &SignedIdentity{Name: s.identityName, Roles: info.Roles, Referenced: info.References}
+}
+
 // Summary renders a Sign result as a short human-readable block.
 func (r SignResult) Summary() string {
 	var b strings.Builder
@@ -365,6 +458,17 @@ func (r SignResult) Summary() string {
 	writeField(&b, "Prior manifest chained as parentOf", boolStr(r.ChainedPriorManifest))
 	writeField(&b, "Timestamped", boolStr(r.Timestamped))
 	writeField(&b, "Soft binding written", r.SoftBinding)
+	if r.Identity != nil {
+		vouched := "the content"
+		if len(r.Identity.Referenced) > 0 {
+			vouched = "the content and " + strings.Join(r.Identity.Referenced, ", ")
+		}
+		roles := ""
+		if len(r.Identity.Roles) > 0 {
+			roles = " as " + strings.Join(r.Identity.Roles, ", ")
+		}
+		writeField(&b, "Vouched for by", fmt.Sprintf("%s%s, over %s (presented; a verifier proves it only against their own anchors)", r.Identity.Name, roles, vouched))
+	}
 	if r.Verify.SignedAt != nil {
 		writeField(&b, "Signed at (verified)", r.Verify.SignedAt.Format(timeLayout))
 	}

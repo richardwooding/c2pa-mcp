@@ -26,7 +26,8 @@ Three operations mirror the library's three modes:
   verifies or produces nothing; a failure IS an error (exit 1 / tool error), unlike an invalid
   manifest under verify. `--soft-binding iscc` / `soft_binding: "iscc"` ALSO writes a
   `c2pa.soft-binding` assertion over a JPEG, PNG, GIF, WebP or TIFF (see the soft-binding notes
-  below); the hard binding is unaffected.
+  below); the hard binding is unaffected. `--identity-key`/`--identity-cert` ALSO write a
+  `cawg.identity` assertion — a second signature by a named actor (see the identity notes).
 
 Requires Go 1.26+.
 
@@ -93,6 +94,42 @@ Three layers, one shared core:
     `SignToFile` writes through a temp file in the target directory and renames into place, so a
     failed sign never truncates an existing file and signing a file onto itself works; an existing
     path is `ErrOutputExists` unless overwrite is set.
+  - `identity.go`: CAWG identities — who vouched for an asset, as against which tool made it.
+    `toIdentityReports` shapes `ValidationResult.Identities` for JSON and `identityInfoFor` builds
+    what `Sign` writes. Nearly all of the care here is in what the words are allowed to mean:
+      - **The governing rule is the spec's.** CAWG says an identity assertion "SHOULD NOT be
+        construed to convey either attribution or ownership of a C2PA asset", and an aggregation
+        credential attests only that the actor PRESENTED signals and PRESENTED this asset. So
+        nothing renders as "created by", and `TestIdentitySummaryNeverClaimsAuthorship` fails the
+        build on the words "created by", "author", "owner", "made by" appearing in a summary line.
+      - **`Name` is proven, `PresentedAs` is claimed** — the same split as `VerifiedSigner` vs
+        `Signers`, and the library enforces it: `Identity.Name()` returns "" unless `Trusted`.
+        Unproven is the NORMAL outcome (neither trust list has a default), so it is worded as a
+        fact, never as a warning.
+      - **`WithIdentityIssuers()` with no DIDs means "trust NO aggregator"** and fails every
+        aggregation credential — Go hands a variadic function a nil slice for zero arguments. The
+        guard therefore lives at the CALL SITE in `toValidateOptions` (only append when the caller
+        named one), never on the arguments. `TestIdentityIssuersNotConfigured` pins it.
+      - **Identity statuses REUSE core codes at their own URI.** `claimSignature.validated` and
+        `signingCredential.trusted` appear at `<manifest>/<assertion label>` for an identity's own
+        signature and chain, so a reader keying off codes alone reports an identity's success as the
+        claim signer's. Read `Identity.Valid`/`Trusted`; `TestIdentityDoesNotVouchForTheClaim`
+        anchors ONLY the actor and asserts `verified_signer` stays empty.
+      - **The library emits no `signingCredential.untrusted` for an identity**, so "unproven" cannot
+        be detected by looking for a code — it is `Valid && !Trusted`. Likewise
+        `cawg.ica.credential_valid` is recorded even for an untrusted issuer.
+      - `PresentedAs` is empty for an aggregation credential (no certificate) and for an X.509 one
+        whose COSE carried no x5chain — guard `Chain[0]`.
+      - **`Identities` is the ACTIVE manifest only.** An ingredient's identities are validated and
+        produce statuses at their own URIs with no entry here.
+      - `did:web` — what some aggregators use — is `cawg.ica.did_unsupported_method`, a FAILURE that
+        makes the whole result invalid. That is a limit of this build rather than a defect in the
+        file, and the tool descriptions say so. Whether it should be informational is upstream's
+        question, filed as an issue.
+      - **No new fixtures.** The X.509 half is tested end to end by signing with a testpki actor and
+        reading it back; the aggregation half is tested at the shaping layer with a hand-built
+        `c2pa.Identity`, because this repo cannot write one and vendoring c2pa-rs's 259 KB
+        `cawg_ica.jpg` would only re-test the library's parser, which the library already does.
   - `softbinding.go`: the ONE thing this repo computes rather than adapts. The `c2pa` library
     implements no soft binding algorithm by design (it takes the value from its caller, so every
     algorithm on the C2PA list works, watermarks included), so `softBindingFor` is the other half of
