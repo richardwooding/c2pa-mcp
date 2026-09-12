@@ -25,8 +25,9 @@ Three operations mirror the library's three modes:
   library validates its own output before writing a byte, so a sign either produces a file that
   verifies or produces nothing; a failure IS an error (exit 1 / tool error), unlike an invalid
   manifest under verify. `--soft-binding iscc` / `soft_binding: "iscc"` ALSO writes a
-  `c2pa.soft-binding` assertion over a JPEG, PNG, GIF, WebP or TIFF (see the soft-binding notes
-  below); the hard binding is unaffected. `--identity-key`/`--identity-cert` ALSO write a
+  `c2pa.soft-binding` assertion — an ISO 24138 **Image-Code** over a JPEG, PNG, GIF, WebP or TIFF,
+  or an **Audio-Code** over a WAV or MP3 (see the soft-binding notes below); the hard binding is
+  unaffected. `--identity-key`/`--identity-cert` ALSO write a
   `cawg.identity` assertion — a second signature by a named actor (see the identity notes).
 
 Requires Go 1.26+.
@@ -133,21 +134,37 @@ Three layers, one shared core:
   - `softbinding.go`: the ONE thing this repo computes rather than adapts. The `c2pa` library
     implements no soft binding algorithm by design (it takes the value from its caller, so every
     algorithm on the C2PA list works, watermarks included), so `softBindingFor` is the other half of
-    that arrangement for `io.iscc.v0` — ISO 24138 — via `fingerprint.ISCCPixelsFromReader` (the
-    normalisation, which is Pillow's arithmetic reproduced in Go) and `iscc-lib` (the code). What to
-    know before touching it:
+    that arrangement for `io.iscc.v0` — ISO 24138 — with two generators behind one gate:
+    `isccImageCode` via `fingerprint.ISCCPixelsFromReader` (the normalisation, which is Pillow's
+    arithmetic reproduced in Go), and `isccAudioCode` via `fingerprint.ChromaprintFrom{WAV,MP3}`.
+    `iscc-lib` turns either into the code. What to know before touching it:
       - **The gate cannot be a map keyed on `c2pa.Container`**, which is what it was until WebP
         and TIFF arrived. A Container names a CARRIER, not a media type: `c2pa.RIFF` is WebP *and*
         WAV *and* AVI, `c2pa.TIFF` is TIFF and BigTIFF and DNG, `c2pa.BMFF` is MP4 alongside
         HEIC/AVIF. The c2pa library parses the RIFF form type (`riff.go`) but keeps it private, and
         nothing it exports says "this is a WebP" — `Info.Format` is producer-declared and empty
-        before signing. So `isccDecodable(container, data)` reads the form type itself at offset 8,
-        the way `file-search-on`'s `imagetype.go` does. TIFF passes on the container alone
-        deliberately: `fingerprint` refuses a DNG, a planar file or BigTIFF WITH A REASON, which is
+        before signing. So `isccMediaFor(container, data)` reads the form type itself at offset 8,
+        the way `file-search-on`'s `imagetype.go` does.
+      - **It returns a media KIND, not a boolean**, because RIFF is a WebP *or* a WAV depending on
+        those four bytes and the two call different algorithms. `TestISCCMediaForRoutesOnContent`
+        is the table. TIFF and MP3 pass on the container alone deliberately: `fingerprint` refuses
+        a DNG, a planar file, BigTIFF, an MPEG-2 MP3 or a Xing-less one WITH A REASON, which is
         more use than anything four bytes could say here.
-      - Adding a format means adding a decoder in `fingerprint` AND satisfying yourself that it
-        agrees with Pillow's, which is what conformance rests on — see that repo's CLAUDE.md for
-        the "exactness follows the codec, not the container" argument the tests are built on.
+      - **Two refusals that look alike from outside must stay apart.** `ErrSoftBindingFormat` means
+        "nothing here can route this" (an AVI, BMFF, a PDF). Audio that routes and then fails to
+        decode returns the decoder's own reason instead. Flattening the second into the first would
+        tell someone with a truncated WAV that WAVs are unsupported;
+        `TestAudioGateAdmitsThenTheDecoderRefuses` pins the distinction.
+      - **`Timespan` is deliberately not set.** `c2pa.SoftBindingBlockInfo` has the field and an
+        Audio-Code covers the whole asset, so `{0, duration}` would assert a scoping that adds no
+        information while implying per-segment bindings exist. Per-chunk codes are a different
+        feature needing a different oracle.
+      - Adding an image format means adding a decoder in `fingerprint` AND satisfying yourself that
+        it agrees with Pillow's, which is what image conformance rests on — see that repo's
+        CLAUDE.md for the "exactness follows the codec, not the container" argument. Audio
+        conformance rests on something different and stricter: the vector has to match `fpcalc`
+        bit for bit, which means the decoding, the downmix and the resampling are all FFmpeg's
+        rather than merely reasonable. That repo's CLAUDE.md records what that cost.
       - **The value is the raw ISCC-UNIT digest; the canonical `ISCC:…` string goes in `name`.**
         A documented CHOICE — the spec says only "algorithm specific format" and the registry entry
         defines none. The reasoning lives in the `c2pa` library's CLAUDE.md; this function and that
@@ -193,6 +210,15 @@ the bitstream, and `TestSignSoftBindingWebP` recomputes the code from the SIGNED
 did not move a pixel. A DNG for the refusal test is built by splicing a `DNGVersion` entry into a
 `tiff.Encode` output (`withTIFFTag`, which also shifts the value offsets past the insertion) rather
 than by vendoring a camera raw.
+
+**Audio needs the other checked-in fixture** (`testdata/sample.mp3`), and for a different reason
+than WebP: it is copied verbatim from `iscc-samples` because it is the exact file `iscc-sdk`
+publishes an ISCC for, so `ISCC:EIAWUJFCEZZOJYVD` is the reference implementation's number rather
+than one this repo computed and then asserted against itself. It also exercises the ID3v2 GEOB
+embedder — c2pa rewrites the tag section, and both the audio frames and the Xing header the gapless
+trimming reads have to survive that, which the recompute assertion proves. WAVs are synthesised in
+the test (`synthWAV`, integer arithmetic only, because Go permits fused multiply-add and
+`TestAudioSoftBindingSurvivesResampling` compares fingerprints across generated rates).
 
 ## Releasing
 
