@@ -32,3 +32,24 @@ TIFF assets in these tests it cannot be synthesised in memory. It exists to prov
 nothing else can: c2pa's RIFF embedder synthesises a `VP8X` chunk when signing a simple-format WebP,
 restructuring the container around the bitstream, and the ISCC recomputed from the *signed* file must
 still equal the one in its own assertion — otherwise a resolver would never match it.
+
+## sample.mp3
+
+"Belly Button", 15.5 seconds, copied **verbatim** from
+[iscc/iscc-samples](https://github.com/iscc/iscc-samples)
+(`iscc_samples/files/audio/demo.mp3`) by Titusz Pan, **CC-BY-4.0** — the same collection and licence
+as the image fixtures the `fingerprint` package uses.
+
+Verbatim matters here. This is the exact file `iscc-sdk`, the reference implementation of ISO 24138,
+publishes a Chromaprint vector and an ISCC for in its `tests/test_audio.py`. That makes
+`ISCC:EIAWUJFCEZZOJYVD` a published number rather than a number this project computed and then
+asserted against itself, and `TestSignSoftBindingMP3` fails loudly if the two ever part company.
+
+It also exercises two things nothing else here does. The MP3 carries a 4119-byte ID3v2 tag with
+cover art, and c2pa embeds an MP3 manifest in an ID3v2 GEOB frame — so signing rewrites the tag
+section the file arrived with. The audio frames have to come through untouched, and the Xing header
+that the gapless trimming depends on has to still be findable behind the new tag. The recompute
+assertion in that test is what proves both.
+
+No WAV fixture is committed: `synthWAV` generates one in the test, deterministically and with
+integer arithmetic only, which costs nothing and keeps the repository small.

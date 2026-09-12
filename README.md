@@ -100,9 +100,12 @@ c2pa-mcp sign photo.jpg photo.jpg --force --signing-key signer.key --signing-cer
 c2pa-mcp sign photo.jpg out.jpg --signing-key signer.key --signing-cert signer.crt \
   --tsa https://timestamp.digicert.com
 
-# Also write a soft binding: an ISO 24138 ISCC Image-Code computed from the
-# pixels, so a re-encoded copy can still be matched back to this manifest
+# Also write a soft binding: an ISO 24138 ISCC computed from the content, so a
+# re-encoded copy can still be matched back to this manifest. An Image-Code
+# over a still, an Audio-Code over a WAV or MP3
 c2pa-mcp sign photo.jpg out.jpg --signing-key signer.key --signing-cert signer.crt \
+  --soft-binding iscc
+c2pa-mcp sign track.mp3 out.mp3 --signing-key signer.key --signing-cert signer.crt \
   --soft-binding iscc
 
 # Sign as a named actor too: a second signature, with the actor's own
@@ -328,34 +331,45 @@ or re-encoded copy can still be matched back to its manifest through a provenanc
 ```sh
 c2pa-mcp sign photo.jpg out.jpg --signing-key signer.key --signing-cert signer.crt --soft-binding iscc
 #   Soft binding written: ISCC:EEA4GQZQTY6J5DTH
+
+c2pa-mcp sign track.mp3 out.mp3 --signing-key signer.key --signing-cert signer.crt --soft-binding iscc
+#   Soft binding written: ISCC:EIAWUJFCEZZOJYVD
 ```
 
-`iscc` computes an **ISO 24138 Image-Code**, registered on the [C2PA soft binding algorithm
+`iscc` computes an **ISO 24138 code**, registered on the [C2PA soft binding algorithm
 list](https://github.com/c2pa-org/softbinding-algorithm-list) as `io.iscc.v0` — the one open,
-general-purpose fingerprint on it. The normalisation the standard assumes (EXIF transpose, flatten
-onto white, trim the border, greyscale, resample to 32×32) comes from
-[`fingerprint`](https://github.com/richardwooding/fingerprint) and the code itself from
-[`iscc-lib`](https://github.com/iscc/iscc-lib), the official pure-Go implementation. Both stay out
-of the `c2pa` library on purpose: it implements no soft binding algorithm, so that it works with
+general-purpose fingerprint on it. An **Image-Code** over a still, or an **Audio-Code** over a WAV
+or MP3. Which one applies is a question about the content, not the container, and RIFF is the case
+that proves it: a WebP and a WAV are the same carrier to C2PA, so the form type is read at offset 8
+and routed on.
+
+Both halves of the input come from [`fingerprint`](https://github.com/richardwooding/fingerprint) —
+the normalisation the standard assumes for images (EXIF transpose, flatten onto white, trim the
+border, greyscale, resample to 32×32), and for audio the Chromaprint vector, which that package
+computes in pure Go and matches `fpcalc` bit for bit. The codes themselves come from
+[`iscc-lib`](https://github.com/iscc/iscc-lib), the official pure-Go implementation. All of it stays
+out of the `c2pa` library on purpose: it implements no soft binding algorithm, so that it works with
 every algorithm on the list — including the 44 proprietary watermarks, which you can still write by
 handing the library your vendor's value.
 
-What it is worth is visible in the test suite: the same image as PNG, as JPEG at default quality, as
+What it is worth is visible in the test suite. The same image as PNG, as JPEG at default quality, as
 JPEG at quality 40, as a palette GIF and as TIFF all produce the **same** `ISCC:` code, while every
-one of those files has a different hard binding. `fingerprint`'s own suite pushes it further — a
-5 KB lossy WebP of a photograph whose JPEG is 35 KB moves 98% of the normalised pixels and still
-produces the same identifier.
+one of those files has a different hard binding. The same holds for audio: one recording at
+44.1 kHz stereo, 22.05 kHz stereo, 11.025 kHz mono and 48 kHz mono gives one identifier, and
+`testdata/sample.mp3` produces `ISCC:EIAWUJFCEZZOJYVD` — the code `iscc-sdk`, the reference
+implementation, publishes for that exact file.
 
 Four things to know:
 
-- **Still images this build can decode: JPEG, PNG, GIF, WebP and TIFF.** Everything else signs as
-  usual but `--soft-binding iscc` refuses it, because a code computed from the wrong pixels is
-  silently wrong rather than an error. Two of those refusals are less obvious than they look:
-  a **WAV or an AVI is the same carrier as a WebP** as far as C2PA is concerned (all three are
-  RIFF), so the form type is read at offset 8 rather than trusted; and a **DNG is a TIFF**, whose
-  first image directory is a small preview rather than the photograph, so it is refused with that
-  reason — as is a TIFF that stores its colour planes separately, which Go's decoder misreads
-  without complaining. HEIC and AVIF need a decoder that does not exist in pure Go.
+- **Content this build can decode: JPEG, PNG, GIF, WebP and TIFF images, and WAV and MP3 audio.**
+  Everything else signs as usual but `--soft-binding iscc` refuses it, because a code computed from
+  the wrong content is silently wrong rather than an error. Several of those refusals are less
+  obvious than they look: an **AVI is the same carrier as a WebP and a WAV** (all three are RIFF),
+  so the form type decides; a **DNG is a TIFF**, whose first image directory is a small preview
+  rather than the photograph; a TIFF storing its colour planes separately is misread by Go's
+  decoder without complaint; and an **MPEG-2 MP3** is refused because the pure-Go decoder
+  mis-handles some of them badly enough to fingerprint as unrelated audio. HEIC, AVIF and the AAC
+  inside an MP4 or M4A need decoders that do not exist in pure Go.
 - **The hard binding is still written.** §9.1 forbids a soft binding from being an asset's only
   content binding, so this adds one; it never substitutes.
 - **The assertion carries the code's raw digest**, with the canonical `ISCC:…` string in the

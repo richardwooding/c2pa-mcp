@@ -7,13 +7,14 @@ require (
 	github.com/iscc/iscc-lib/packages/go v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/richardwooding/c2pa v0.22.0
-	github.com/richardwooding/fingerprint v0.3.1
+	github.com/richardwooding/fingerprint v0.4.0
 	golang.org/x/image v0.41.0
 )
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
+	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect

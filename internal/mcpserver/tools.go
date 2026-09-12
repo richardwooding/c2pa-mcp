@@ -78,7 +78,7 @@ type SignArgs struct {
 	DigitalSourceType  string   `json:"digital_source_type,omitempty" jsonschema:"IPTC digital source type of a created asset: a full URL or a bare term such as digitalCapture, trainedAlgorithmicMedia or compositeWithTrainedAlgorithmicMedia; 'empty' is C2PA's own"`
 	IdentityRoles      []string `json:"identity_roles,omitempty" jsonschema:"Roles the named actor declares (cawg.creator, cawg.editor, …), when this server was started with an identity credential. A declaration by the actor, not proof of anything"`
 	IdentityReferences []string `json:"identity_references,omitempty" jsonschema:"Extra assertion labels the named actor signs over (e.g. c2pa.actions.v2). The content itself is always signed over and must not be listed"`
-	SoftBinding        string   `json:"soft_binding,omitempty" jsonschema:"Also write a soft binding, a perceptual identifier that survives re-encoding and lets a stripped copy be matched back to this manifest: 'iscc' computes an ISO 24138 Image-Code (io.iscc.v0) over a JPEG, PNG, GIF, WebP or TIFF. Omit or 'none' for no soft binding. The hard binding is always written too"`
+	SoftBinding        string   `json:"soft_binding,omitempty" jsonschema:"Also write a soft binding, a perceptual identifier that survives re-encoding and lets a stripped copy be matched back to this manifest: 'iscc' computes an ISO 24138 code (io.iscc.v0) — an Image-Code over a JPEG, PNG, GIF, WebP or TIFF, or an Audio-Code over a WAV or MP3. Omit or 'none' for no soft binding. The hard binding is always written too"`
 }
 
 // errOutputRequired is the sign tool's refusal to guess where a file should go.
