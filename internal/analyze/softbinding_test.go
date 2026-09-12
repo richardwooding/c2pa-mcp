@@ -269,11 +269,11 @@ func TestSoftBindingForRefusals(t *testing.T) {
 		{"pdf", SoftBindingISCC, c2pa.PDF, nil, ErrSoftBindingFormat},
 		{"mp4 or heic — same container to c2pa", SoftBindingISCC, c2pa.BMFF, nil, ErrSoftBindingFormat},
 		{"svg", SoftBindingISCC, c2pa.SVG, nil, ErrSoftBindingFormat},
-		{"mp3", SoftBindingISCC, c2pa.MP3, nil, ErrSoftBindingFormat},
-		// A WAV is a c2pa.RIFF exactly as a WebP is, which is why the gate has
-		// to read the form type rather than trust the container.
-		{"wav, not webp", SoftBindingISCC, c2pa.RIFF, riffOf("WAVE"), ErrSoftBindingFormat},
-		{"avi, not webp", SoftBindingISCC, c2pa.RIFF, riffOf("AVI "), ErrSoftBindingFormat},
+		// A WebP, a WAV and an AVI are all c2pa.RIFF, which is why the gate has
+		// to read the form type rather than trust the container. Two of the
+		// three now route somewhere; the third is still nothing this can
+		// fingerprint. See TestISCCMediaForRoutesOnContent.
+		{"avi, neither image nor audio", SoftBindingISCC, c2pa.RIFF, riffOf("AVI "), ErrSoftBindingFormat},
 		{"riff too short to name a form", SoftBindingISCC, c2pa.RIFF, []byte("RIFF"), ErrSoftBindingFormat},
 	}
 	for _, tc := range cases {
@@ -447,7 +447,7 @@ func TestSignSoftBindingWebP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !isWebP(asset) {
+	if riffFormType(asset) != "WEBP" {
 		t.Fatal("fixture is not a WebP")
 	}
 	wantCode, wantDigest := isccOf(t, asset)

@@ -194,7 +194,7 @@ type SignCmd struct {
 	DigitalSourceType string      `name:"digital-source-type" help:"IPTC digital source type of a created asset: a full URL or a bare term such as digitalCapture, trainedAlgorithmicMedia or compositeWithTrainedAlgorithmicMedia; 'empty' is C2PA's own."`
 	IdentityRole      []string    `name:"identity-role" help:"Role the named actor declares, repeatable: cawg.creator, cawg.editor, cawg.producer, … or an entity label such as com.example.reviewer. Needs --identity-key and --identity-cert."`
 	IdentityReference []string    `name:"identity-reference" help:"Assertion label the named actor also signs over, repeatable (e.g. c2pa.actions.v2). The content itself is always signed over."`
-	SoftBinding       string      `name:"soft-binding" enum:"none,iscc" default:"none" help:"Also write a soft binding, a perceptual identifier that survives re-encoding: 'iscc' computes an ISO 24138 Image-Code (io.iscc.v0) over a JPEG, PNG, GIF, WebP or TIFF. The hard binding is still written; verifiers report a soft binding without checking it."`
+	SoftBinding       string      `name:"soft-binding" enum:"none,iscc" default:"none" help:"Also write a soft binding, a perceptual identifier that survives re-encoding: 'iscc' computes an ISO 24138 code (io.iscc.v0) — an Image-Code over a JPEG, PNG, GIF, WebP or TIFF, or an Audio-Code over a WAV or MP3. The hard binding is still written; verifiers report a soft binding without checking it."`
 	Force             bool        `help:"Overwrite an existing output file."`
 	JSON              bool        `help:"Emit JSON instead of a human-readable summary."`
 }

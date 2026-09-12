@@ -31,9 +31,10 @@ import (
 const (
 	// SoftBindingNone writes no soft binding, and is the default.
 	SoftBindingNone = "none"
-	// SoftBindingISCC computes an ISCC Image-Code (ISO 24138), registered on
-	// the C2PA soft binding algorithm list as io.iscc.v0 — the one open,
-	// general-purpose fingerprint on it. JPEG, PNG, GIF, WebP and TIFF.
+	// SoftBindingISCC computes an ISCC (ISO 24138), registered on the C2PA
+	// soft binding algorithm list as io.iscc.v0 — the one open,
+	// general-purpose fingerprint on it. An Image-Code over a JPEG, PNG, GIF,
+	// WebP or TIFF, or an Audio-Code over a WAV or MP3.
 	SoftBindingISCC = "iscc"
 )
 
@@ -42,14 +43,29 @@ const (
 // name the algorithm the way the list does.
 const isccAlgorithm = "io.iscc.v0"
 
-// isccBits is the Image-Code's length in bits. 64 is the standard's default and
-// what every published vector uses. It is deliberately not a flag: two
-// producers who pick different widths cannot compare their codes, which is the
-// only thing a soft binding is for.
+// isccBits is the code's length in bits. 64 is the standard's default and what
+// every published vector uses. It is deliberately not a flag: two producers who
+// pick different widths cannot compare their codes, which is the only thing a
+// soft binding is for.
 const isccBits = 64
 
-// isccDecodable reports whether an asset in this container is one this build
-// can turn into pixels, given its leading bytes.
+// isccMedia is which ISO 24138 code an asset calls for, which is a question
+// about the CONTENT rather than the carrier. An Image-Code and an Audio-Code
+// are different algorithms over different features, and only the bytes can say
+// which applies.
+type isccMedia int
+
+const (
+	// isccMediaNone is an asset this build cannot decode either way.
+	isccMediaNone isccMedia = iota
+	// isccMediaImage calls for GenImageCodeV0 over normalised pixels.
+	isccMediaImage
+	// isccMediaAudio calls for GenAudioCodeV0 over a Chromaprint vector.
+	isccMediaAudio
+)
+
+// isccMediaFor reports which code an asset in this container calls for, given
+// its leading bytes.
 //
 // The bytes are needed because a c2pa.Container names a CARRIER, not a media
 // type: c2pa.RIFF is WebP *and* WAV *and* AVI, c2pa.TIFF is TIFF and BigTIFF
@@ -57,38 +73,55 @@ const isccBits = 64
 // parses the RIFF form type but keeps it private, and nothing it exports says
 // "this is a WebP" — Info.Format is producer-declared and empty before signing
 // — so the form type is read here, at offset 8, the way file-search-on's
-// imagetype.go reads it.
+// imagetype.go reads it. RIFF is the case that makes the point: the same
+// carrier is an image or audio depending on four bytes.
 //
-// TIFF passes on the container alone even though several TIFF layouts are
-// undecodable: fingerprint refuses those WITH A REASON (a DNG, separate colour
-// planes, BigTIFF), which is more useful than anything four bytes could say
-// here. HEIC and AVIF have no pure-Go decoder at all, so BMFF is refused.
-func isccDecodable(container c2pa.Container, data []byte) bool {
+// TIFF and MP3 pass on the container alone even though some of each are
+// undecodable: fingerprint refuses those WITH A REASON — a DNG, separate
+// colour planes, BigTIFF; an MPEG-2 MP3, a missing Xing header — which is more
+// useful than anything four bytes could say here. BMFF is refused outright:
+// HEIC and AVIF have no pure-Go decoder, and neither does the AAC that an MP4
+// or M4A carries.
+func isccMediaFor(container c2pa.Container, data []byte) isccMedia {
 	switch container {
 	case c2pa.JPEG, c2pa.PNG, c2pa.GIF, c2pa.TIFF:
-		return true
+		return isccMediaImage
+	case c2pa.MP3:
+		return isccMediaAudio
 	case c2pa.RIFF:
-		return isWebP(data)
+		switch riffFormType(data) {
+		case "WEBP":
+			return isccMediaImage
+		case "WAVE":
+			return isccMediaAudio
+		}
+		return isccMediaNone
 	default:
-		return false
+		return isccMediaNone
 	}
 }
 
-// isWebP reports whether a RIFF file's form type is WEBP rather than WAVE or
-// AVI. All three are the same carrier to c2pa, and only one is an image.
-func isWebP(data []byte) bool {
-	return len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP"
+// riffFormType returns a RIFF file's four-byte form type, or "" if the bytes
+// are not a RIFF at all. WEBP, WAVE and AVI are the same carrier to c2pa.
+func riffFormType(data []byte) string {
+	if len(data) < 12 || string(data[:4]) != "RIFF" {
+		return ""
+	}
+	return string(data[8:12])
 }
 
 // isccFormatDetail names what the asset actually is, for a refusal message. A
-// bare container name would tell a user with a WAV that "this asset is riff",
+// bare container name would tell a user with an AVI that "this asset is riff",
 // which is true and useless.
-func isccFormatDetail(container c2pa.Container) string {
+func isccFormatDetail(container c2pa.Container, data []byte) string {
 	switch container {
 	case c2pa.RIFF:
-		return "a RIFF container that is not a WebP, so a WAV or an AVI"
+		if form := riffFormType(data); form != "" {
+			return "a RIFF container whose form type is " + form + ", which is neither a WebP nor a WAV"
+		}
+		return "too short to name a RIFF form type"
 	case c2pa.BMFF:
-		return "BMFF — an MP4, or a HEIC/AVIF, which needs a decoder that does not exist in pure Go"
+		return "BMFF — an MP4, M4A, HEIC or AVIF, all of which need a decoder that does not exist in pure Go"
 	default:
 		return string(container)
 	}
@@ -100,7 +133,7 @@ var (
 	ErrSoftBindingAlgorithm = errors.New(`soft binding must be "iscc" (ISO 24138, io.iscc.v0) or "none"`)
 	// ErrSoftBindingFormat is returned when the algorithm is one this tool can
 	// compute but the asset is not one it can compute it over.
-	ErrSoftBindingFormat = errors.New("an ISCC Image-Code needs a still image this build can decode: JPEG, PNG, GIF, WebP or TIFF")
+	ErrSoftBindingFormat = errors.New("an ISCC needs content this build can decode: a JPEG, PNG, GIF, WebP or TIFF image, or WAV or MP3 audio")
 )
 
 // softBindingFor computes the soft binding named by alg over the asset bytes,
@@ -124,22 +157,22 @@ func softBindingFor(alg string, container c2pa.Container, data []byte) (*c2pa.So
 	default:
 		return nil, "", fmt.Errorf("%w: got %q", ErrSoftBindingAlgorithm, alg)
 	}
-	if !isccDecodable(container, data) {
-		return nil, "", fmt.Errorf("%w (this asset is %s)", ErrSoftBindingFormat, isccFormatDetail(container))
+	var (
+		code *isccCode
+		err  error
+	)
+	switch isccMediaFor(container, data) {
+	case isccMediaImage:
+		code, err = isccImageCode(data)
+	case isccMediaAudio:
+		code, err = isccAudioCode(container, data)
+	default:
+		return nil, "", fmt.Errorf("%w (this asset is %s)", ErrSoftBindingFormat, isccFormatDetail(container, data))
+	}
+	if err != nil {
+		return nil, "", err
 	}
 
-	// The normalisation — EXIF transpose, flatten onto white, trim the border,
-	// grayscale, resample to 32x32 — is the half of ISO 24138 its conformance
-	// vectors do not cover, since they start from the 1024 pixels. It is
-	// Pillow's arithmetic reproduced in Go; see the fingerprint package.
-	pixels, err := fingerprint.ISCCPixelsFromReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, "", fmt.Errorf("normalise the image for ISCC: %w", err)
-	}
-	code, err := iscc.GenImageCodeV0(pixels, isccBits)
-	if err != nil {
-		return nil, "", fmt.Errorf("compute the ISCC Image-Code: %w", err)
-	}
 	dec, err := iscc.IsccDecode(code.Iscc)
 	if err != nil {
 		return nil, "", fmt.Errorf("decode the ISCC %q: %w", code.Iscc, err)
@@ -149,6 +182,58 @@ func softBindingFor(alg string, container c2pa.Container, data []byte) (*c2pa.So
 		Name:      code.Iscc,
 		Blocks:    []c2pa.SoftBindingBlockInfo{{Value: dec.Digest}},
 	}, code.Iscc, nil
+}
+
+// isccCode is the shape both generators return: a canonical "ISCC:…" string.
+// The two halves of ISO 24138 have separate result types upstream, and
+// everything downstream of here treats them identically.
+type isccCode struct{ Iscc string }
+
+// isccImageCode computes an Image-Code.
+//
+// The normalisation — EXIF transpose, flatten onto white, trim the border,
+// grayscale, resample to 32x32 — is the half of ISO 24138 its conformance
+// vectors do not cover, since they start from the 1024 pixels. It is Pillow's
+// arithmetic reproduced in Go; see the fingerprint package.
+func isccImageCode(data []byte) (*isccCode, error) {
+	pixels, err := fingerprint.ISCCPixelsFromReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("normalise the image for ISCC: %w", err)
+	}
+	code, err := iscc.GenImageCodeV0(pixels, isccBits)
+	if err != nil {
+		return nil, fmt.Errorf("compute the ISCC Image-Code: %w", err)
+	}
+	return &isccCode{Iscc: code.Iscc}, nil
+}
+
+// isccAudioCode computes an Audio-Code.
+//
+// The Chromaprint vector is the half ISO 24138 leaves to the caller, exactly
+// as the 1024 pixels are on the image side, and it is the same fingerprint
+// package that supplies it. What is different is that the vector has to match
+// fpcalc's to the bit, because an Audio-Code is the SimHash of it: the
+// decoding, the downmix and the resampling all have to be FFmpeg's, not merely
+// reasonable. See that package for what that cost.
+func isccAudioCode(container c2pa.Container, data []byte) (*isccCode, error) {
+	var (
+		cv  []int32
+		err error
+	)
+	switch container {
+	case c2pa.MP3:
+		cv, err = fingerprint.ChromaprintFromMP3(bytes.NewReader(data))
+	default: // RIFF, already known to be a WAVE
+		cv, err = fingerprint.ChromaprintFromWAV(bytes.NewReader(data))
+	}
+	if err != nil {
+		return nil, fmt.Errorf("fingerprint the audio for ISCC: %w", err)
+	}
+	code, err := iscc.GenAudioCodeV0(cv, isccBits)
+	if err != nil {
+		return nil, fmt.Errorf("compute the ISCC Audio-Code: %w", err)
+	}
+	return &isccCode{Iscc: code.Iscc}, nil
 }
 
 // SoftBindingReport is the JSON-serializable form of one c2pa.SoftBinding a
