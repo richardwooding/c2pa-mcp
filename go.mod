@@ -8,7 +8,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/richardwooding/c2pa v0.22.0
 	github.com/richardwooding/fingerprint v0.4.0
-	golang.org/x/image v0.41.0
+	golang.org/x/image v0.46.0
 )
 
 require (
@@ -24,13 +24,13 @@ require (
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	golang.org/x/crypto v0.56.0 // indirect
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
-	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.48.0 // indirect
+	golang.org/x/tools v0.49.0 // indirect
 )
 
 tool golang.org/x/exp/cmd/gorelease
