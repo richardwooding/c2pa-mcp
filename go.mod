@@ -6,13 +6,13 @@ require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/iscc/iscc-lib/packages/go v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/richardwooding/c2pa v0.22.0
-	github.com/richardwooding/fingerprint v0.4.0
+	github.com/richardwooding/c2pa v0.22.1
+	github.com/richardwooding/fingerprint v0.4.1
 	golang.org/x/image v0.46.0
 )
 
 require (
-	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.4 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
@@ -22,7 +22,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
-	golang.org/x/crypto v0.56.0 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/oauth2 v0.35.0 // indirect
