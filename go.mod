@@ -7,7 +7,7 @@ require (
 	github.com/iscc/iscc-lib/packages/go v0.6.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/richardwooding/c2pa v0.22.1
-	github.com/richardwooding/fingerprint v0.4.1
+	github.com/richardwooding/fingerprint v0.5.0
 	golang.org/x/image v0.46.0
 )
 

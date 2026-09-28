@@ -25,8 +25,8 @@ github.com/modelcontextprotocol/go-sdk v1.8.0 h1:KIvahhYqwtbeniWVPs3TcXEA7b8jEtw
 github.com/modelcontextprotocol/go-sdk v1.8.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
 github.com/richardwooding/c2pa v0.22.1 h1:huSOLDJXmeXtoeomOCYQxEurWMBAHZGOjjoCAOy/odg=
 github.com/richardwooding/c2pa v0.22.1/go.mod h1:dn38Y+Kb4XqEfB4bc2PJmlxDbH0c2xH9kOaVZiKQKGU=
-github.com/richardwooding/fingerprint v0.4.1 h1:XSVvMjJp0g5GICOafB6WD5AhaOOqOCXeWkyJ4U4CSMo=
-github.com/richardwooding/fingerprint v0.4.1/go.mod h1:E7x1TNn+tF0YkCcrc9L4hxrRCsfgV6kbc7h40RydFq8=
+github.com/richardwooding/fingerprint v0.5.0 h1:uia/sk7575cLnvkimWoKCCbDdtfF3aptIzZWZ3uFolg=
+github.com/richardwooding/fingerprint v0.5.0/go.mod h1:looxA3YHvcjSxjYRHcQVkvH6b3EbBwiE1eIwX7NySNc=
 github.com/segmentio/asm v1.1.3 h1:WM03sfUOENvvKexOLp+pCqgb/WDjsi7EK8gIsICtzhc=
 github.com/segmentio/asm v1.1.3/go.mod h1:Ld3L4ZXGNcSLRg4JBsZ3//1+f/TjYl0Mzen/DQy1EJg=
 github.com/segmentio/encoding v0.5.4 h1:OW1VRern8Nw6ITAtwSZ7Idrl3MXCFwXHPgqESYfvNt0=
